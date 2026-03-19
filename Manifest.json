@@ -1,0 +1,22 @@
+{
+  "name": "NairaX – Crypto & Naira Wallet",
+  "short_name": "NairaX",
+  "description": "Your Crypto. Your Naira. One Wallet.",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#00A86B",
+  "theme_color": "#00A86B",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%2300A86B'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-family='Arial Black' font-size='80' fill='white'>₦X</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%2300A86B'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-family='Arial Black' font-size='220' fill='white'>₦X</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

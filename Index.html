@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#00A86B" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="NairaX" />
+  <title>NairaX – Crypto & Naira Wallet</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+</head>
+<body>
+
+<!-- SPLASH SCREEN -->
+<div id="splash-screen" class="splash">
+  <div class="splash-logo">
+    <div class="splash-icon">₦X</div>
+    <h1>NairaX</h1>
+    <p>Your Crypto. Your Naira. One Wallet.</p>
+  </div>
+</div>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen" class="screen hidden">
+  <div class="auth-bg"></div>
+  <div class="auth-container">
+    <div class="auth-logo">
+      <div class="auth-icon">₦X</div>
+      <h2>NairaX</h2>
+    </div>
+
+    <!-- SIGNUP TAB -->
+    <div id="signup-view">
+      <h3 class="auth-title">Create Account</h3>
+      <p class="auth-sub">Your phone number is your account</p>
+      <div class="input-group">
+        <label>Full Name</label>
+        <input type="text" id="signup-name" placeholder="e.g. Amaka Okafor" />
+      </div>
+      <div class="input-group">
+        <label>Phone Number</label>
+        <div class="phone-input">
+          <span class="flag">🇳🇬 +234</span>
+          <input type="tel" id="signup-phone" placeholder="0801 234 5678" maxlength="11" />
+        </div>
+      </div>
+      <div class="input-group">
+        <label>PIN (4 digits)</label>
+        <input type="password" id="signup-pin" placeholder="••••" maxlength="4" inputmode="numeric" />
+      </div>
+      <button class="btn-primary" onclick="App.signup()">Create Account</button>
+      <p class="auth-switch">Already have an account? <span onclick="App.showLogin()">Sign In</span></p>
+    </div>
+
+    <!-- LOGIN TAB -->
+    <div id="login-view" class="hidden">
+      <h3 class="auth-title">Welcome Back</h3>
+      <p class="auth-sub">Sign in to your NairaX wallet</p>
+      <div class="input-group">
+        <label>Phone Number</label>
+        <div class="phone-input">
+          <span class="flag">🇳🇬 +234</span>
+          <input type="tel" id="login-phone" placeholder="0801 234 5678" maxlength="11" />
+        </div>
+      </div>
+      <div class="input-group">
+        <label>PIN</label>
+        <input type="password" id="login-pin" placeholder="••••" maxlength="4" inputmode="numeric" />
+      </div>
+      <button class="btn-primary" onclick="App.login()">Sign In</button>
+      <p class="auth-switch">New user? <span onclick="App.showSignup()">Create Account</span></p>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app-screen" class="screen hidden">
+
+  <!-- HOME TAB -->
+  <div id="tab-home" class="tab-content active">
+    <div class="home-header">
+      <div class="header-top">
+        <div class="user-greeting">
+          <p>Good morning,</p>
+          <h3 id="user-name-display">User</h3>
+        </div>
+        <div class="header-actions">
+          <button class="icon-btn" onclick="App.toggleBalanceVisibility()"><i class="fas fa-eye" id="eye-icon"></i></button>
+          <button class="icon-btn" onclick="App.showNotifications()"><i class="fas fa-bell"></i></button>
+        </div>
+      </div>
+
+      <!-- BALANCE CARD -->
+      <div class="balance-card">
+        <div class="balance-label">Total Balance</div>
+        <div class="balance-amount" id="total-balance-display">₦0.00</div>
+        <div class="balance-sub" id="phone-account-display">Acct: ---</div>
+        <div class="balance-actions">
+          <button class="bal-btn" onclick="App.openModal('add-money-modal')">
+            <i class="fas fa-plus"></i> Add Money
+          </button>
+          <button class="bal-btn" onclick="App.openModal('send-modal')">
+            <i class="fas fa-paper-plane"></i> Send
+          </button>
+          <button class="bal-btn" onclick="App.openModal('receive-modal')">
+            <i class="fas fa-qrcode"></i> Receive
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUICK ACTIONS -->
+    <div class="section-title">Quick Actions</div>
+    <div class="quick-actions">
+      <div class="qa-item" onclick="App.openModal('send-modal')">
+        <div class="qa-icon green"><i class="fas fa-paper-plane"></i></div>
+        <span>Send</span>
+      </div>
+      <div class="qa-item" onclick="App.openModal('airtime-modal')">
+        <div class="qa-icon blue"><i class="fas fa-mobile-alt"></i></div>
+        <span>Airtime</span>
+      </div>
+      <div class="qa-item" onclick="App.openModal('data-modal')">
+        <div class="qa-icon purple"><i class="fas fa-wifi"></i></div>
+        <span>Data</span>
+      </div>
+      <div class="qa-item" onclick="App.openModal('electricity-modal')">
+        <div class="qa-icon orange"><i class="fas fa-bolt"></i></div>
+        <span>Electricity</span>
+      </div>
+      <div class="qa-item" onclick="App.openModal('cable-modal')">
+        <div class="qa-icon red"><i class="fas fa-tv"></i></div>
+        <span>Cable TV</span>
+      </div>
+      <div class="qa-item" onclick="App.switchTab('crypto-tab')">
+        <div class="qa-icon teal"><i class="fab fa-ethereum"></i></div>
+        <span>Crypto</span>
+      </div>
+    </div>
+
+    <!-- ASSETS BREAKDOWN -->
+    <div class="section-title">My Assets</div>
+    <div class="assets-card" id="assets-list">
+      <!-- Filled by JS -->
+    </div>
+
+    <!-- RECENT TRANSACTIONS -->
+    <div class="section-title">Recent Transactions</div>
+    <div id="recent-txns" class="txn-list">
+      <!-- Filled by JS -->
+    </div>
+
+    <div style="height: 100px"></div>
+  </div>
+
+  <!-- CRYPTO TAB -->
+  <div id="tab-crypto" class="tab-content hidden">
+    <div class="page-header">
+      <h2>Crypto Wallet</h2>
+      <p class="page-sub">Testnet – Sepolia ETH & more</p>
+    </div>
+
+    <div class="crypto-wallet-card">
+      <div class="cw-label">EVM Wallet Address</div>
+      <div class="cw-address" id="wallet-address-display">0x...</div>
+      <button class="copy-btn" onclick="App.copyWalletAddress()"><i class="fas fa-copy"></i> Copy</button>
+    </div>
+
+    <div class="section-title">Supported Testnets</div>
+    <div class="chain-list">
+      <div class="chain-item active-chain">
+        <img src="https://cryptologos.cc/logos/ethereum-eth-logo.png" class="chain-logo" onerror="this.style.display='none'"/>
+        <div class="chain-info">
+          <span class="chain-name">Sepolia ETH</span>
+          <span class="chain-net">Ethereum Testnet</span>
+        </div>
+        <span class="chain-badge">Active</span>
+      </div>
+      <div class="chain-item">
+        <div class="chain-logo-placeholder" style="background:#7b3fe4">ARB</div>
+        <div class="chain-info">
+          <span class="chain-name">Arbitrum Sepolia</span>
+          <span class="chain-net">Arbitrum Testnet</span>
+        </div>
+        <span class="chain-badge coming">Soon</span>
+      </div>
+      <div class="chain-item">
+        <div class="chain-logo-placeholder" style="background:#0052ff">BASE</div>
+        <div class="chain-info">
+          <span class="chain-name">Base Sepolia</span>
+          <span class="chain-net">Base Testnet</span>
+        </div>
+        <span class="chain-badge coming">Soon</span>
+      </div>
+      <div class="chain-item">
+        <div class="chain-logo-placeholder" style="background:#ff6b2b">MONAD</div>
+        <div class="chain-info">
+          <span class="chain-name">Monad Testnet</span>
+          <span class="chain-net">Monad Chain</span>
+        </div>
+        <span class="chain-badge coming">Soon</span>
+      </div>
+    </div>
+
+    <div class="section-title">Deposit Testnet Crypto</div>
+    <div class="deposit-info-card">
+      <p>Send Sepolia ETH to your wallet address above. Once received, the Naira equivalent will reflect in your total balance instantly.</p>
+      <div class="deposit-steps">
+        <div class="dep-step"><span class="step-num">1</span> Get Sepolia ETH from a faucet</div>
+        <div class="dep-step"><span class="step-num">2</span> Send to your NairaX wallet address</div>
+        <div class="dep-step"><span class="step-num">3</span> Balance updates in Naira automatically</div>
+      </div>
+      <button class="btn-primary" onclick="App.simulateCryptoDeposit()">🧪 Simulate Deposit (Demo)</button>
+    </div>
+
+    <div style="height: 100px"></div>
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div id="tab-history" class="tab-content hidden">
+    <div class="page-header">
+      <h2>Transaction History</h2>
+    </div>
+    <div id="full-txn-list" class="txn-list">
+      <!-- Filled by JS -->
+    </div>
+    <div style="height: 100px"></div>
+  </div>
+
+  <!-- PROFILE TAB -->
+  <div id="tab-profile" class="tab-content hidden">
+    <div class="page-header">
+      <h2>My Profile</h2>
+    </div>
+    <div class="profile-card">
+      <div class="profile-avatar" id="profile-avatar">A</div>
+      <div class="profile-name" id="profile-name-display">---</div>
+      <div class="profile-phone" id="profile-phone-display">---</div>
+    </div>
+
+    <div class="profile-menu">
+      <div class="pm-item">
+        <i class="fas fa-wallet pm-icon green"></i>
+        <span>Wallet Address</span>
+        <i class="fas fa-chevron-right pm-arrow"></i>
+      </div>
+      <div class="pm-item">
+        <i class="fas fa-shield-alt pm-icon blue"></i>
+        <span>Security & PIN</span>
+        <i class="fas fa-chevron-right pm-arrow"></i>
+      </div>
+      <div class="pm-item">
+        <i class="fas fa-university pm-icon purple"></i>
+        <span>Linked Bank Accounts</span>
+        <i class="fas fa-chevron-right pm-arrow"></i>
+      </div>
+      <div class="pm-item">
+        <i class="fas fa-question-circle pm-icon orange"></i>
+        <span>Help & Support</span>
+        <i class="fas fa-chevron-right pm-arrow"></i>
+      </div>
+      <div class="pm-item" onclick="App.logout()">
+        <i class="fas fa-sign-out-alt pm-icon red"></i>
+        <span>Logout</span>
+        <i class="fas fa-chevron-right pm-arrow"></i>
+      </div>
+    </div>
+
+    <div class="app-version">NairaX Demo v1.0 • Testnet Mode</div>
+    <div style="height: 100px"></div>
+  </div>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav">
+    <div class="nav-item active" onclick="App.switchTab('home-tab')" id="nav-home">
+      <i class="fas fa-home"></i>
+      <span>Home</span>
+    </div>
+    <div class="nav-item" onclick="App.switchTab('crypto-tab')" id="nav-crypto">
+      <i class="fab fa-ethereum"></i>
+      <span>Crypto</span>
+    </div>
+    <div class="nav-item nav-send-center" onclick="App.openModal('send-modal')">
+      <div class="nav-send-btn"><i class="fas fa-paper-plane"></i></div>
+    </div>
+    <div class="nav-item" onclick="App.switchTab('history-tab')" id="nav-history">
+      <i class="fas fa-list-ul"></i>
+      <span>History</span>
+    </div>
+    <div class="nav-item" onclick="App.switchTab('profile-tab')" id="nav-profile">
+      <i class="fas fa-user"></i>
+      <span>Profile</span>
+    </div>
+  </nav>
+</div>
+
+<!-- ========== MODALS ========== -->
+
+<!-- SEND MONEY MODAL -->
+<div id="send-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Send Money</h3>
+    <p class="modal-sub">Send to any bank account or NairaX user</p>
+
+    <div class="send-type-tabs">
+      <button class="stype active" id="stype-bank" onclick="App.setSendType('bank')">🏦 Bank Account</button>
+      <button class="stype" id="stype-user" onclick="App.setSendType('user')">📱 NairaX User</button>
+    </div>
+
+    <div id="bank-send-form">
+      <div class="input-group">
+        <label>Bank Name</label>
+        <select id="send-bank">
+          <option>Access Bank</option>
+          <option>GTBank</option>
+          <option>First Bank</option>
+          <option>Zenith Bank</option>
+          <option>UBA</option>
+          <option>Kuda Bank</option>
+          <option>OPay</option>
+          <option>Moniepoint</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label>Account Number</label>
+        <input type="tel" id="send-account-no" placeholder="10-digit account number" maxlength="10" oninput="App.lookupAccount()" />
+      </div>
+      <div class="input-group" id="account-name-group" style="display:none">
+        <label>Account Name</label>
+        <div class="account-name-display" id="account-name-display"></div>
+      </div>
+    </div>
+
+    <div id="user-send-form" class="hidden">
+      <div class="input-group">
+        <label>Phone Number (NairaX User)</label>
+        <input type="tel" id="send-user-phone" placeholder="08012345678" maxlength="11" oninput="App.lookupNairaXUser()" />
+      </div>
+      <div class="input-group" id="user-name-group" style="display:none">
+        <label>User</label>
+        <div class="account-name-display" id="send-user-name-display"></div>
+      </div>
+    </div>
+
+    <div class="input-group">
+      <label>Amount (₦)</label>
+      <input type="number" id="send-amount" placeholder="e.g. 5000" oninput="App.calcSendFee()" />
+    </div>
+
+    <div class="fee-breakdown" id="fee-breakdown" style="display:none">
+      <div class="fee-row"><span>Amount</span><span id="fee-amount">₦0</span></div>
+      <div class="fee-row"><span>Fee (0.75%)</span><span id="fee-charge">₦0</span></div>
+      <div class="fee-row total"><span>Total Deducted</span><span id="fee-total">₦0</span></div>
+      <div class="fee-row source"><span>Source</span><span id="fee-source">Naira Balance</span></div>
+    </div>
+
+    <div class="input-group">
+      <label>Narration (optional)</label>
+      <input type="text" id="send-narration" placeholder="e.g. School fees" />
+    </div>
+
+    <button class="btn-primary" onclick="App.executeSend()">Send Money</button>
+    <button class="btn-ghost" onclick="App.closeModal('send-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- RECEIVE MODAL -->
+<div id="receive-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Receive Money</h3>
+
+    <div class="receive-tabs">
+      <button class="rtab active" onclick="App.setReceiveTab('naira')">Naira</button>
+      <button class="rtab" onclick="App.setReceiveTab('crypto')">Crypto</button>
+    </div>
+
+    <div id="receive-naira">
+      <div class="receive-info">
+        <div class="ri-label">Your Account Number</div>
+        <div class="ri-value" id="receive-phone-display">---</div>
+        <div class="ri-bank">NairaX Bank</div>
+      </div>
+      <button class="copy-btn full" onclick="App.copyPhone()"><i class="fas fa-copy"></i> Copy Account Number</button>
+    </div>
+
+    <div id="receive-crypto" class="hidden">
+      <div class="qr-placeholder" id="qr-code-display">
+        <i class="fas fa-qrcode" style="font-size:80px;color:var(--green)"></i>
+      </div>
+      <div class="receive-info">
+        <div class="ri-label">Your EVM Wallet Address</div>
+        <div class="ri-value small" id="receive-wallet-display">0x...</div>
+        <div class="ri-bank">Supports: Sepolia ETH, ARB, BASE, MONAD</div>
+      </div>
+      <button class="copy-btn full" onclick="App.copyWalletAddress()"><i class="fas fa-copy"></i> Copy Address</button>
+    </div>
+
+    <button class="btn-ghost" onclick="App.closeModal('receive-modal')">Close</button>
+  </div>
+</div>
+
+<!-- ADD MONEY MODAL -->
+<div id="add-money-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Add Money</h3>
+    <p class="modal-sub">Fund your NairaX wallet</p>
+
+    <div class="add-option" onclick="App.addTestNaira()">
+      <div class="ao-icon" style="background:#e8f8f0"><i class="fas fa-money-bill-wave" style="color:var(--green)"></i></div>
+      <div class="ao-info">
+        <div class="ao-title">Get Test Naira</div>
+        <div class="ao-sub">Receive ₦100,000 test funds instantly</div>
+      </div>
+      <i class="fas fa-chevron-right"></i>
+    </div>
+
+    <div class="add-option" onclick="App.closeModal('add-money-modal'); App.switchTab('crypto-tab')">
+      <div class="ao-icon" style="background:#f0f0ff"><i class="fab fa-ethereum" style="color:#7b3fe4"></i></div>
+      <div class="ao-info">
+        <div class="ao-title">Deposit Crypto</div>
+        <div class="ao-sub">Send testnet crypto, shown in Naira</div>
+      </div>
+      <i class="fas fa-chevron-right"></i>
+    </div>
+
+    <button class="btn-ghost" onclick="App.closeModal('add-money-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- AIRTIME MODAL -->
+<div id="airtime-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Buy Airtime</h3>
+    <div class="network-grid">
+      <div class="net-item active-net" onclick="App.selectNetwork(this,'MTN')"><div class="net-logo mtn">MTN</div></div>
+      <div class="net-item" onclick="App.selectNetwork(this,'Airtel')"><div class="net-logo airtel">Airtel</div></div>
+      <div class="net-item" onclick="App.selectNetwork(this,'Glo')"><div class="net-logo glo">Glo</div></div>
+      <div class="net-item" onclick="App.selectNetwork(this,'9mobile')"><div class="net-logo nmobile">9M</div></div>
+    </div>
+    <div class="input-group">
+      <label>Phone Number</label>
+      <input type="tel" id="airtime-phone" placeholder="08012345678" />
+    </div>
+    <div class="input-group">
+      <label>Amount (₦)</label>
+      <div class="quick-amounts">
+        <button onclick="document.getElementById('airtime-amount').value=100">₦100</button>
+        <button onclick="document.getElementById('airtime-amount').value=200">₦200</button>
+        <button onclick="document.getElementById('airtime-amount').value=500">₦500</button>
+        <button onclick="document.getElementById('airtime-amount').value=1000">₦1,000</button>
+      </div>
+      <input type="number" id="airtime-amount" placeholder="Enter amount" />
+    </div>
+    <button class="btn-primary" onclick="App.buyAirtime()">Buy Airtime</button>
+    <button class="btn-ghost" onclick="App.closeModal('airtime-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- DATA MODAL -->
+<div id="data-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Buy Data</h3>
+    <div class="network-grid">
+      <div class="net-item active-net" onclick="App.selectNetwork(this,'MTN')"><div class="net-logo mtn">MTN</div></div>
+      <div class="net-item" onclick="App.selectNetwork(this,'Airtel')"><div class="net-logo airtel">Airtel</div></div>
+      <div class="net-item" onclick="App.selectNetwork(this,'Glo')"><div class="net-logo glo">Glo</div></div>
+      <div class="net-item" onclick="App.selectNetwork(this,'9mobile')"><div class="net-logo nmobile">9M</div></div>
+    </div>
+    <div class="input-group">
+      <label>Phone Number</label>
+      <input type="tel" id="data-phone" placeholder="08012345678" />
+    </div>
+    <div class="input-group">
+      <label>Select Plan</label>
+      <select id="data-plan">
+        <option value="500">1GB – ₦500 (1 day)</option>
+        <option value="1000">2GB – ₦1,000 (7 days)</option>
+        <option value="2000">5GB – ₦2,000 (30 days)</option>
+        <option value="3500">10GB – ₦3,500 (30 days)</option>
+      </select>
+    </div>
+    <button class="btn-primary" onclick="App.buyData()">Buy Data</button>
+    <button class="btn-ghost" onclick="App.closeModal('data-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- ELECTRICITY MODAL -->
+<div id="electricity-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Pay Electricity</h3>
+    <div class="input-group">
+      <label>Disco</label>
+      <select id="disco-select">
+        <option>PHED (Port Harcourt)</option>
+        <option>EKEDC (Eko)</option>
+        <option>IKEDC (Ikeja)</option>
+        <option>AEDC (Abuja)</option>
+        <option>KEDCO (Kano)</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label>Meter Number</label>
+      <input type="text" id="meter-number" placeholder="Enter meter number" />
+    </div>
+    <div class="input-group">
+      <label>Amount (₦)</label>
+      <input type="number" id="electricity-amount" placeholder="Minimum ₦1,000" />
+    </div>
+    <button class="btn-primary" onclick="App.payElectricity()">Pay Now</button>
+    <button class="btn-ghost" onclick="App.closeModal('electricity-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- CABLE TV MODAL -->
+<div id="cable-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Cable TV Subscription</h3>
+    <div class="input-group">
+      <label>Provider</label>
+      <select id="cable-provider">
+        <option>DSTV</option>
+        <option>GOTV</option>
+        <option>Startimes</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label>Smart Card / IUC Number</label>
+      <input type="text" id="cable-card" placeholder="Enter card number" />
+    </div>
+    <div class="input-group">
+      <label>Package</label>
+      <select id="cable-package">
+        <option value="4900">DSTV Compact – ₦4,900</option>
+        <option value="10500">DSTV Premium – ₦10,500</option>
+        <option value="1900">GOTV Jolli – ₦1,900</option>
+        <option value="3200">GOTV Supa – ₦3,200</option>
+      </select>
+    </div>
+    <button class="btn-primary" onclick="App.payCable()">Subscribe</button>
+    <button class="btn-ghost" onclick="App.closeModal('cable-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- PIN CONFIRM MODAL -->
+<div id="pin-modal" class="modal-overlay hidden">
+  <div class="modal-sheet small">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Confirm PIN</h3>
+    <p class="modal-sub">Enter your 4-digit PIN to authorize</p>
+    <div class="pin-dots" id="pin-dots">
+      <span></span><span></span><span></span><span></span>
+    </div>
+    <div class="pin-pad">
+      <button onclick="App.pinInput('1')">1</button>
+      <button onclick="App.pinInput('2')">2</button>
+      <button onclick="App.pinInput('3')">3</button>
+      <button onclick="App.pinInput('4')">4</button>
+      <button onclick="App.pinInput('5')">5</button>
+      <button onclick="App.pinInput('6')">6</button>
+      <button onclick="App.pinInput('7')">7</button>
+      <button onclick="App.pinInput('8')">8</button>
+      <button onclick="App.pinInput('9')">9</button>
+      <button onclick="App.pinInput('clr')" class="pin-special">⌫</button>
+      <button onclick="App.pinInput('0')">0</button>
+      <button onclick="App.pinInput('ok')" class="pin-special ok">OK</button>
+    </div>
+    <button class="btn-ghost" onclick="App.closeModal('pin-modal')">Cancel</button>
+  </div>
+</div>
+
+<!-- SUCCESS OVERLAY -->
+<div id="success-overlay" class="modal-overlay hidden">
+  <div class="success-card">
+    <div class="success-icon">✅</div>
+    <h2 id="success-title">Success!</h2>
+    <p id="success-message">Transaction completed.</p>
+    <button class="btn-primary" onclick="App.closeSuccess()">Done</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
