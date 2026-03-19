@@ -456,6 +456,141 @@ html, body {
 .success-card h2 { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
 .success-card p { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.5; }
 
+/* ---- INFO BANNER ---- */
+.info-banner {
+  background: var(--green-light); color: var(--green);
+  border-radius: 10px; padding: 10px 14px;
+  font-size: 13px; font-weight: 600; margin-bottom: 16px;
+}
+
+/* ---- CRYPTO BALANCE DISPLAY ---- */
+.crypto-balance-display {
+  background: var(--bg); border-radius: 10px; padding: 10px 14px;
+  font-size: 13px; font-weight: 700; color: var(--purple);
+  margin-bottom: 16px; text-align: center;
+}
+
+/* ---- PRICE TICKER ---- */
+.price-ticker {
+  position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 430px; background: #1a1a2e;
+  z-index: 200; overflow: hidden; height: 28px;
+}
+.ticker-inner {
+  display: flex; align-items: center; padding: 0 16px; height: 100%; gap: 10px;
+  overflow-x: auto; white-space: nowrap;
+}
+.ticker-inner::-webkit-scrollbar { display: none; }
+.ticker-item { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.8); }
+.ticker-sep { color: rgba(255,255,255,0.3); font-size: 10px; }
+.tick-chg { font-weight: 700; margin-left: 4px; }
+.tick-chg.up { color: #00e676; }
+.tick-chg.down { color: #ff5252; }
+.tick-chg.neutral { color: rgba(255,255,255,0.5); }
+
+/* ---- ADMIN PANEL ---- */
+#admin-screen { background: #0f0f1a; color: white; }
+.admin-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 54px 20px 16px; background: #1a1a2e;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.admin-back {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: rgba(255,255,255,0.1); border: none;
+  color: white; font-size: 14px; cursor: pointer;
+}
+.admin-header h2 { flex: 1; font-size: 18px; font-weight: 800; color: white; }
+.admin-badge {
+  background: #e53935; color: white; font-size: 10px; font-weight: 800;
+  padding: 3px 8px; border-radius: 6px; letter-spacing: 0.5px;
+}
+
+.admin-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px; padding: 16px;
+}
+.admin-stat-card {
+  border-radius: 14px; padding: 16px;
+}
+.admin-stat-card.green  { background: linear-gradient(135deg, #00A86B, #00c87a); }
+.admin-stat-card.dark   { background: linear-gradient(135deg, #1a1a2e, #16213e); border: 1px solid rgba(255,255,255,0.1); }
+.admin-stat-card.blue   { background: linear-gradient(135deg, #1565C0, #1976D2); }
+.admin-stat-card.purple { background: linear-gradient(135deg, #6a1b9a, #8e24aa); }
+.asc-label { font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 6px; font-weight: 600; }
+.asc-value { font-size: 18px; font-weight: 800; color: white; margin-bottom: 4px; }
+.asc-sub   { font-size: 11px; color: rgba(255,255,255,0.6); }
+
+.admin-price-card {
+  margin: 0 16px 16px; background: #1a1a2e;
+  border-radius: 14px; padding: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.apc-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.apc-row:last-child { border-bottom: none; }
+.apc-label { font-size: 13px; color: rgba(255,255,255,0.6); }
+.apc-value { font-size: 13px; font-weight: 700; color: white; }
+
+.admin-section-title {
+  padding: 12px 16px 8px; font-size: 13px; font-weight: 700;
+  color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+.admin-log {
+  margin: 0 16px; background: #1a1a2e; border-radius: 14px;
+  padding: 8px; max-height: 240px; overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.admin-log::-webkit-scrollbar { display: none; }
+.admin-empty { text-align: center; color: rgba(255,255,255,0.3); padding: 20px; font-size: 13px; }
+
+.settlement-item {
+  padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px;
+}
+.settlement-item:last-child { border-bottom: none; }
+.si-title { font-weight: 700; color: white; margin-bottom: 3px; }
+.si-detail { color: rgba(255,255,255,0.5); font-size: 11px; }
+.si-badge {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 5px; margin-left: 6px;
+}
+.si-badge.naira-to-eth { background: #e8f8f0; color: #00A86B; }
+.si-badge.eth-to-naira { background: #f0f0ff; color: #7b3fe4; }
+.si-badge.fee          { background: #fff3e0; color: #f57c00; }
+
+.admin-users {
+  margin: 0 16px; background: #1a1a2e; border-radius: 14px;
+  overflow: hidden; border: 1px solid rgba(255,255,255,0.08);
+}
+.admin-user-item {
+  display: flex; align-items: center; padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.admin-user-item:last-child { border-bottom: none; }
+.aui-avatar {
+  width: 36px; height: 36px; border-radius: 50%; background: var(--green);
+  color: white; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-right: 10px;
+}
+.aui-info { flex: 1; }
+.aui-name  { font-size: 13px; font-weight: 700; color: white; }
+.aui-phone { font-size: 11px; color: rgba(255,255,255,0.5); }
+.aui-bal   { text-align: right; }
+.aui-naira { font-size: 13px; font-weight: 700; color: #00e676; }
+.aui-crypto{ font-size: 11px; color: rgba(255,255,255,0.5); }
+
+.admin-actions {
+  display: flex; flex-direction: column; gap: 10px; padding: 16px;
+}
+.admin-btn {
+  width: 100%; padding: 14px; border: none; border-radius: 12px;
+  font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer;
+}
+.admin-btn.green  { background: var(--green); color: white; }
+.admin-btn.dark   { background: #1a1a2e; color: white; border: 1px solid rgba(255,255,255,0.2); }
+.admin-btn.red    { background: #c62828; color: white; }
+
 /* ---- SCROLLBAR HIDE ---- */
 .tab-content::-webkit-scrollbar,
 .modal-sheet::-webkit-scrollbar { display: none; }

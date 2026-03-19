@@ -308,11 +308,13 @@
     <h3 class="modal-title">Send Money</h3>
     <p class="modal-sub">Send to any bank account or NairaX user</p>
 
-    <div class="send-type-tabs">
-      <button class="stype active" id="stype-bank" onclick="App.setSendType('bank')">🏦 Bank Account</button>
+    <div class="send-type-tabs" style="flex-wrap:wrap;gap:6px;">
+      <button class="stype active" id="stype-bank" onclick="App.setSendType('bank')">🏦 Bank</button>
       <button class="stype" id="stype-user" onclick="App.setSendType('user')">📱 NairaX User</button>
+      <button class="stype" id="stype-crypto" onclick="App.setSendType('crypto')">⟠ Send Crypto</button>
     </div>
 
+    <!-- BANK FORM -->
     <div id="bank-send-form">
       <div class="input-group">
         <label>Bank Name</label>
@@ -335,37 +337,93 @@
         <label>Account Name</label>
         <div class="account-name-display" id="account-name-display"></div>
       </div>
+      <div class="input-group">
+        <label>Amount (₦)</label>
+        <input type="number" id="send-amount" placeholder="e.g. 5000" oninput="App.calcSendFee()" />
+      </div>
+      <div class="fee-breakdown" id="fee-breakdown" style="display:none">
+        <div class="fee-row"><span>Amount</span><span id="fee-amount">₦0</span></div>
+        <div class="fee-row"><span>Fee (0.75%)</span><span id="fee-charge">₦0</span></div>
+        <div class="fee-row total"><span>Total Deducted</span><span id="fee-total">₦0</span></div>
+        <div class="fee-row source"><span>Source</span><span id="fee-source">Naira Balance</span></div>
+      </div>
+      <div class="input-group">
+        <label>Narration (optional)</label>
+        <input type="text" id="send-narration" placeholder="e.g. School fees" />
+      </div>
     </div>
 
+    <!-- NAIRAX USER FORM -->
     <div id="user-send-form" class="hidden">
+      <div class="info-banner">💡 Free transfer between NairaX users. Send Naira or Crypto.</div>
       <div class="input-group">
-        <label>Phone Number (NairaX User)</label>
+        <label>Recipient Phone (NairaX User)</label>
         <input type="tel" id="send-user-phone" placeholder="08012345678" maxlength="11" oninput="App.lookupNairaXUser()" />
       </div>
       <div class="input-group" id="user-name-group" style="display:none">
-        <label>User</label>
+        <label>User Found</label>
         <div class="account-name-display" id="send-user-name-display"></div>
+      </div>
+      <div class="input-group">
+        <label>What to send</label>
+        <select id="user-send-asset" onchange="App.calcSendFee()">
+          <option value="naira">Nigerian Naira (₦)</option>
+          <!-- Crypto options injected by JS -->
+        </select>
+      </div>
+      <div class="input-group" id="user-naira-amount-group">
+        <label>Amount (₦)</label>
+        <input type="number" id="send-user-amount" placeholder="e.g. 5000" oninput="App.calcSendFee()" />
+      </div>
+      <div class="input-group hidden" id="user-crypto-amount-group">
+        <label>Amount (ETH)</label>
+        <input type="number" id="send-user-crypto-amount" placeholder="e.g. 0.01" step="0.0001" oninput="App.calcSendFee()" />
+        <small id="crypto-naira-equiv" style="color:var(--green);font-weight:600;margin-top:4px;display:block;"></small>
+      </div>
+      <div class="fee-breakdown" id="user-fee-breakdown" style="display:none">
+        <div class="fee-row"><span>Amount</span><span id="user-fee-amount">₦0</span></div>
+        <div class="fee-row"><span>Fee</span><span id="user-fee-charge">Free ✅</span></div>
+        <div class="fee-row total"><span>Total</span><span id="user-fee-total">₦0</span></div>
+      </div>
+      <div class="input-group">
+        <label>Narration (optional)</label>
+        <input type="text" id="send-user-narration" placeholder="e.g. for lunch" />
       </div>
     </div>
 
-    <div class="input-group">
-      <label>Amount (₦)</label>
-      <input type="number" id="send-amount" placeholder="e.g. 5000" oninput="App.calcSendFee()" />
+    <!-- SEND CRYPTO (EVM WALLET) FORM -->
+    <div id="crypto-send-form" class="hidden">
+      <div class="info-banner" style="background:#f0f0ff;color:var(--purple);">⟠ Send testnet crypto directly to any EVM wallet address</div>
+      <div class="input-group">
+        <label>Select Asset</label>
+        <select id="crypto-send-asset" onchange="App.updateCryptoSendBalance()">
+          <!-- Injected by JS -->
+        </select>
+      </div>
+      <div class="crypto-balance-display" id="crypto-send-balance">Available: 0 ETH</div>
+      <div class="input-group">
+        <label>Recipient Wallet Address</label>
+        <input type="text" id="crypto-send-address" placeholder="0x..." oninput="App.validateCryptoAddress()" />
+        <small id="crypto-address-status" style="margin-top:4px;display:block;"></small>
+      </div>
+      <div class="input-group">
+        <label>Amount (ETH)</label>
+        <input type="number" id="crypto-send-amount" placeholder="e.g. 0.005" step="0.0001" oninput="App.calcCryptoSendFee()" />
+        <small id="crypto-send-naira-val" style="color:var(--green);font-weight:600;margin-top:4px;display:block;"></small>
+      </div>
+      <div class="fee-breakdown" id="crypto-fee-breakdown" style="display:none">
+        <div class="fee-row"><span>Amount</span><span id="csend-amount">0 ETH</span></div>
+        <div class="fee-row"><span>Network Fee (est.)</span><span id="csend-fee">0 ETH</span></div>
+        <div class="fee-row total"><span>Total</span><span id="csend-total">0 ETH</span></div>
+        <div class="fee-row source"><span>Naira value sent</span><span id="csend-naira">₦0</span></div>
+      </div>
+      <div class="input-group">
+        <label>Narration (optional)</label>
+        <input type="text" id="crypto-send-narration" placeholder="e.g. Payment for services" />
+      </div>
     </div>
 
-    <div class="fee-breakdown" id="fee-breakdown" style="display:none">
-      <div class="fee-row"><span>Amount</span><span id="fee-amount">₦0</span></div>
-      <div class="fee-row"><span>Fee (0.75%)</span><span id="fee-charge">₦0</span></div>
-      <div class="fee-row total"><span>Total Deducted</span><span id="fee-total">₦0</span></div>
-      <div class="fee-row source"><span>Source</span><span id="fee-source">Naira Balance</span></div>
-    </div>
-
-    <div class="input-group">
-      <label>Narration (optional)</label>
-      <input type="text" id="send-narration" placeholder="e.g. School fees" />
-    </div>
-
-    <button class="btn-primary" onclick="App.executeSend()">Send Money</button>
+    <button class="btn-primary" id="send-main-btn" onclick="App.executeSend()">Send Money</button>
     <button class="btn-ghost" onclick="App.closeModal('send-modal')">Cancel</button>
   </div>
 </div>
@@ -551,6 +609,83 @@
     <button class="btn-primary" onclick="App.payCable()">Subscribe</button>
     <button class="btn-ghost" onclick="App.closeModal('cable-modal')">Cancel</button>
   </div>
+</div>
+
+<!-- PRICE TICKER BAR -->
+<div id="price-ticker" class="price-ticker hidden">
+  <div class="ticker-inner">
+    <span class="ticker-item" id="tick-eth">⟠ sETH  ₦3,800,000 <span class="tick-chg neutral" id="tick-eth-chg">+0.00%</span></span>
+    <span class="ticker-sep">•</span>
+    <span class="ticker-item" id="tick-pool-info">Pool: ₦50M / 10 ETH</span>
+    <span class="ticker-sep">•</span>
+    <span class="ticker-item" id="tick-users">0 users</span>
+  </div>
+</div>
+
+<!-- ADMIN PANEL -->
+<div id="admin-screen" class="screen hidden">
+  <div class="admin-header">
+    <button class="admin-back" onclick="App.closeAdmin()"><i class="fas fa-arrow-left"></i></button>
+    <h2>NairaX Pool Admin</h2>
+    <span class="admin-badge">INTERNAL</span>
+  </div>
+
+  <div class="admin-grid">
+    <div class="admin-stat-card green">
+      <div class="asc-label">Pool Naira</div>
+      <div class="asc-value" id="admin-pool-naira">₦0</div>
+      <div class="asc-sub">Company naira reserve</div>
+    </div>
+    <div class="admin-stat-card dark">
+      <div class="asc-label">Pool ETH</div>
+      <div class="asc-value" id="admin-pool-eth">0 ETH</div>
+      <div class="asc-sub" id="admin-pool-eth-naira">≈ ₦0</div>
+    </div>
+    <div class="admin-stat-card blue">
+      <div class="asc-label">Total Pool Value</div>
+      <div class="asc-value" id="admin-pool-total">₦0</div>
+      <div class="asc-sub">Naira + Crypto</div>
+    </div>
+    <div class="admin-stat-card purple">
+      <div class="asc-label">Users</div>
+      <div class="asc-value" id="admin-user-count">0</div>
+      <div class="asc-sub" id="admin-user-balances">Funds: ₦0</div>
+    </div>
+  </div>
+
+  <div class="admin-price-card">
+    <div class="apc-row">
+      <span class="apc-label">ETH/NGN Rate</span>
+      <span class="apc-value" id="admin-eth-rate">₦3,800,000</span>
+    </div>
+    <div class="apc-row">
+      <span class="apc-label">24h Change</span>
+      <span class="apc-value" id="admin-eth-change">+0.00%</span>
+    </div>
+    <div class="apc-row">
+      <span class="apc-label">Last Tick</span>
+      <span class="apc-value" id="admin-last-update">--</span>
+    </div>
+    <div class="apc-row">
+      <span class="apc-label">Total Settlements</span>
+      <span class="apc-value" id="admin-settlement-count">0</span>
+    </div>
+  </div>
+
+  <div class="admin-section-title">Settlement Log <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(every crypto↔naira swap)</span></div>
+  <div id="admin-settlement-log" class="admin-log">
+    <p class="admin-empty">No settlements yet</p>
+  </div>
+
+  <div class="admin-section-title">All Users</div>
+  <div id="admin-users-list" class="admin-users"></div>
+
+  <div class="admin-actions">
+    <button class="admin-btn green" onclick="App.adminTopUpPool('naira')">+ ₦10M to Pool</button>
+    <button class="admin-btn dark" onclick="App.adminTopUpPool('eth')">+ 5 ETH to Pool</button>
+    <button class="admin-btn red" onclick="App.adminResetAll()">⚠ Reset All</button>
+  </div>
+  <div style="height:40px"></div>
 </div>
 
 <!-- TOAST -->
