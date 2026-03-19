@@ -1,0 +1,54 @@
+# NairaX Demo – Setup Guide
+
+## Files
+- `index.html` – Main app shell + all screens & modals
+- `style.css` – All styles (OPay-inspired mobile UI)
+- `app.js` – All logic: auth, wallet, send, crypto, bills, DB
+- `manifest.json` – PWA manifest (add to home screen)
+
+## How to Run
+
+### Option 1: Local (quick test)
+Just open `index.html` in Chrome/Firefox on your phone or desktop.
+
+### Option 2: Host on GitHub Pages (free, sharable link)
+1. Create a GitHub repo, upload all 4 files to root
+2. Go to Settings → Pages → Deploy from branch (main / root)
+3. Your app is live at: `https://yourusername.github.io/repo-name`
+4. Share the link and open on Android → tap "Add to Home Screen"
+
+### Option 3: Host on Netlify (free, instant)
+1. Go to netlify.com → "Deploy manually"
+2. Drag and drop the folder with all 4 files
+3. Get a live URL instantly
+
+---
+
+## Add to Android Home Screen (PWA)
+1. Open the URL in Chrome on Android
+2. Tap the 3-dot menu → "Add to Home screen"
+3. App will open fullscreen like a native app
+
+---
+
+## Demo Features
+- **Signup/Login** with phone number + 4-digit PIN
+- **₦100,000 test Naira** credited on signup
+- **EVM wallet** auto-generated from your phone number
+- **Send to bank**: simulates fee calculation (0.75% on crypto→naira sends)
+- **Send to NairaX user**: free naira-to-naira between test accounts
+- **Crypto deposit simulation**: click "Simulate Deposit" on Crypto tab
+  - Adds 0.026 sETH (~₦98,800) to your balance
+  - Shows breakdown in Assets section
+- **Bills**: Airtime, Data, Electricity, Cable TV (all deduct from balance)
+- **Multi-device**: data saved to localStorage, same phone = same wallet
+- **Transaction history**: full log with timestamps
+
+---
+
+## Architecture Notes (for investor pitch)
+- Frontend: Vanilla JS + CSS (no framework = fast, lightweight)
+- Storage: localStorage (demo) → swap for Firebase/Supabase in production
+- Wallets: deterministic generation (demo) → use ethers.js + secure key storage in production
+- Crypto pricing: hardcoded rate (demo) → use Binance/CoinGecko API in production
+- Pool model: company holds naira + crypto → pays out naira when user sends, accumulates crypto
