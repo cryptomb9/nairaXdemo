@@ -1,0 +1,13 @@
+{
+  "name": "nairax",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check app.js && node --check netlify/functions/signup.js && node --check netlify/functions/config.js && node --check netlify/functions/ngn-banking.js && node --check netlify/functions/faucet.js && node --check netlify/functions/crypto.js && node --check netlify/functions/conversions.js && node --check netlify/functions/smart-spend.js && node --check netlify/functions/admin.js && node --check netlify/functions/lib/wallets.js && node --check netlify/functions/lib/ledger.js && node --check netlify/functions/lib/fees.js && node --check server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "ethers": "^6.13.4"
+  }
+}
