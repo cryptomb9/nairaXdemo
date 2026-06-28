@@ -330,7 +330,7 @@ declare
   platform_fee numeric(36, 18) := coalesce(p_platform_fee_amount, 0);
   statutory_fee numeric(36, 18) := coalesce(p_statutory_fee_amount, 0);
 begin
-  if p_recipient_type not in ('nairax_user', 'external_bank') then
+  if p_recipient_type not in ('nairax_user', 'external_bank', 'bill_payment') then
     raise exception 'unsupported Smart Spend recipient type';
   end if;
 
@@ -339,8 +339,8 @@ begin
     raise exception 'unsupported Smart Spend asset';
   end if;
 
-  if p_recipient_type = 'external_bank' and receive_asset <> 'NGN' then
-    raise exception 'external bank Smart Spend must settle NGN';
+  if p_recipient_type in ('external_bank', 'bill_payment') and receive_asset <> 'NGN' then
+    raise exception 'external bank and bill payment Smart Spend must settle NGN';
   end if;
 
   if p_receive_amount <= 0 or p_source_amount <= 0 or p_total_deducted <= 0 then
@@ -359,7 +359,7 @@ begin
     limit 1;
     if receiver.id is null then raise exception 'NairaX recipient not found'; end if;
     if receiver.id = p_sender_user_id then raise exception 'cannot send to yourself'; end if;
-  elsif length(clean_identifier) <> 10 then
+  elsif p_recipient_type = 'external_bank' and length(clean_identifier) <> 10 then
     raise exception 'enter a valid 10-digit destination account number';
   end if;
 
@@ -381,10 +381,15 @@ begin
     from public.ledger_accounts
     where owner_type = 'customer' and owner_id = receiver.id and account_type = 'customer_custody' and asset_code = receive_asset
     limit 1;
-  else
+  elsif p_recipient_type = 'external_bank' then
     select id into bank_sink_account_id
     from public.ledger_accounts
     where owner_type = 'platform' and account_type = 'simulated_external_bank_settlement_sink' and asset_code = 'NGN'
+    limit 1;
+  else
+    select id into bank_sink_account_id
+    from public.ledger_accounts
+    where owner_type = 'platform' and account_type = 'demo_ngn_burn_sink' and asset_code = 'NGN'
     limit 1;
   end if;
 
@@ -414,8 +419,8 @@ begin
   if p_recipient_type = 'nairax_user' and receiver_account_id is null then
     raise exception 'receiver ledger account is missing';
   end if;
-  if p_recipient_type = 'external_bank' and bank_sink_account_id is null then
-    raise exception 'external bank settlement ledger account is missing';
+  if p_recipient_type in ('external_bank', 'bill_payment') and bank_sink_account_id is null then
+    raise exception 'settlement ledger account is missing';
   end if;
 
   select available into sender_available
@@ -495,6 +500,7 @@ begin
       'recipient_type', p_recipient_type,
       'recipient_identifier', clean_identifier,
       'bank_name', p_bank_name,
+      'bill_provider', p_bank_name,
       'receive_asset', receive_asset,
       'receive_amount', p_receive_amount,
       'source_asset', source_asset,
@@ -521,7 +527,16 @@ begin
     values (tx_id, receiver_account_id, receiver.id, 'user_credit', 'credit', receive_asset, p_receive_amount, 'Smart Spend receiver credit');
   else
     insert into public.ledger_entries (transaction_id, account_id, user_id, entry_role, direction, asset_code, amount, memo)
-    values (tx_id, bank_sink_account_id, null, 'external_bank_settlement_movement', 'credit', 'NGN', p_receive_amount, 'Smart Spend simulated external bank settlement');
+    values (
+      tx_id,
+      bank_sink_account_id,
+      null,
+      case when p_recipient_type = 'bill_payment' then 'demo_burn_movement' else 'external_bank_settlement_movement' end,
+      'credit',
+      'NGN',
+      p_receive_amount,
+      case when p_recipient_type = 'bill_payment' then 'Smart Spend simulated bill payment settlement' else 'Smart Spend simulated external bank settlement' end
+    );
   end if;
 
   if source_asset <> receive_asset then
@@ -562,7 +577,7 @@ begin
       platform_fee + case when source_asset = 'NGN' then statutory_fee else statutory_source end,
       platform_fee, statutory_fee, 0,
       platform_fee + case when source_asset = 'NGN' then statutory_fee else statutory_source end,
-      source_asset, 'smart_spend', fee_account_id, 'posted'
+      source_asset, case when p_recipient_type = 'bill_payment' then 'bill_payment_crypto_fee' else 'smart_spend' end, fee_account_id, 'posted'
     );
   end if;
 
@@ -574,19 +589,34 @@ begin
   )
   values (
     p_sender_user_id, tx_id, 'out',
-    'Smart Spend: sent ' || p_receive_amount::text || ' ' || receive_asset,
+    case
+      when p_recipient_type = 'bill_payment' then 'Paid bill: ' || coalesce(p_recipient_name, p_bank_name, 'Bill payment')
+      else 'Smart Spend: sent ' || p_receive_amount::text || ' ' || receive_asset
+    end,
     p_receive_amount,
     case when source_asset = receive_asset then 'Paid directly with ' || source_asset else 'Auto-converted from ' || source_asset || ' to ' || receive_asset end,
-    case when p_recipient_type = 'nairax_user' then receiver.full_name else coalesce(p_recipient_name, 'External bank recipient') end,
+    case
+      when p_recipient_type = 'nairax_user' then receiver.full_name
+      when p_recipient_type = 'bill_payment' then coalesce(p_bank_name, 'Bill provider')
+      else coalesce(p_recipient_name, 'External bank recipient')
+    end,
     case when p_recipient_type = 'nairax_user' then receiver.account_number else clean_identifier end,
     'smart_spend', 'posted', source_asset,
     platform_fee + case when source_asset = 'NGN' then statutory_fee else statutory_source end,
     p_total_deducted,
     sender.full_name, sender.account_number,
-    case when p_recipient_type = 'nairax_user' then receiver.full_name else coalesce(p_recipient_name, 'External bank recipient') end,
+    case
+      when p_recipient_type = 'nairax_user' then receiver.full_name
+      when p_recipient_type = 'bill_payment' then coalesce(p_bank_name, 'Bill provider')
+      else coalesce(p_recipient_name, 'External bank recipient')
+    end,
     case when p_recipient_type = 'nairax_user' then receiver.account_number else clean_identifier end,
     p_bank_name,
-    case when p_recipient_type = 'nairax_user' then receiver.full_name else coalesce(p_recipient_name, 'External bank recipient') end,
+    case
+      when p_recipient_type = 'nairax_user' then receiver.full_name
+      when p_recipient_type = 'bill_payment' then coalesce(p_bank_name, 'Bill provider')
+      else coalesce(p_recipient_name, 'External bank recipient')
+    end,
     case when p_recipient_type = 'nairax_user' then receiver.account_number else clean_identifier end,
     coalesce(p_narration, 'Smart Spend'),
     now(), p_rate_used, source_asset, receive_asset
@@ -696,6 +726,15 @@ create table if not exists public.conversion_transactions (
 create index if not exists conversion_transactions_user_created_idx
 on public.conversion_transactions(user_id, created_at desc);
 
+alter table public.conversion_transactions add column if not exists network text;
+alter table public.conversion_transactions add column if not exists token_contract text;
+alter table public.conversion_transactions add column if not exists user_wallet_address text;
+alter table public.conversion_transactions add column if not exists treasury_wallet_address text;
+alter table public.conversion_transactions add column if not exists fee_wallet_address text;
+alter table public.conversion_transactions add column if not exists treasury_tx_hash text;
+alter table public.conversion_transactions add column if not exists fee_tx_hash text;
+alter table public.conversion_transactions add column if not exists settlement_status text not null default 'ledger_posted';
+
 alter table public.conversion_transactions enable row level security;
 
 drop policy if exists "users can read own conversions" on public.conversion_transactions;
@@ -784,10 +823,6 @@ begin
     raise exception 'conversion assets must be different';
   end if;
 
-  if normalized_from <> 'NGN' and normalized_to <> 'NGN' then
-    raise exception 'only NGN-to-crypto and crypto-to-NGN conversions are enabled';
-  end if;
-
   if normalized_from not in ('NGN', 'USDCX', 'MON', 'ETHX', 'cirBTCX', 'EURCX')
      or normalized_to not in ('NGN', 'USDCX', 'MON', 'ETHX', 'cirBTCX', 'EURCX') then
     raise exception 'unsupported conversion asset';
@@ -797,7 +832,11 @@ begin
     raise exception 'invalid conversion preview';
   end if;
 
-  tx_type := case when normalized_from = 'NGN' then 'ngn_crypto_conversion' else 'crypto_ngn_conversion' end;
+  tx_type := case
+    when normalized_from = 'NGN' then 'ngn_crypto_conversion'
+    when normalized_to = 'NGN' then 'crypto_ngn_conversion'
+    else 'swap'
+  end;
 
   select * into profile from public.profiles where id = p_user_id;
   if profile.id is null then
@@ -878,7 +917,7 @@ begin
     where account_id = treasury_from_account_id;
     update public.ledger_account_balances set available = available - p_to_amount, updated_at = now()
     where account_id = treasury_to_account_id;
-  else
+  elsif normalized_to = 'NGN' then
     update public.balances
     set available = available - p_total_deducted,
         ngn_value = greatest(0, ngn_value - p_amount_ngn_equivalent),
@@ -898,6 +937,27 @@ begin
     update public.ledger_account_balances set available = available + p_from_amount + statutory_source_amount, updated_at = now()
     where account_id = treasury_from_account_id;
     update public.ledger_account_balances set available = available - (p_to_amount + p_statutory_fee_amount), updated_at = now()
+    where account_id = treasury_to_account_id;
+  else
+    update public.balances
+    set available = available - p_total_deducted,
+        ngn_value = greatest(0, ngn_value - p_amount_ngn_equivalent),
+        updated_at = now()
+    where user_id = p_user_id and asset_code = normalized_from;
+
+    update public.balances
+    set available = available + p_to_amount,
+        ngn_value = ngn_value + p_amount_ngn_equivalent,
+        updated_at = now()
+    where user_id = p_user_id and asset_code = normalized_to;
+
+    update public.ledger_account_balances set available = available - p_total_deducted, updated_at = now()
+    where account_id = user_from_account_id;
+    update public.ledger_account_balances set available = available + p_to_amount, updated_at = now()
+    where account_id = user_to_account_id;
+    update public.ledger_account_balances set available = available + p_from_amount + statutory_source_amount, updated_at = now()
+    where account_id = treasury_from_account_id;
+    update public.ledger_account_balances set available = available - p_to_amount, updated_at = now()
     where account_id = treasury_to_account_id;
   end if;
 
@@ -934,7 +994,12 @@ begin
       'statutory_fee_source_amount', statutory_source_amount,
       'total_fee_amount', p_total_fee_amount,
       'total_deducted', p_total_deducted,
-      'ledger_only', true
+      'ledger_only', false,
+      'settlement_model', case
+        when normalized_from = 'NGN' then 'treasury_sends_crypto_to_user_wallet'
+        when normalized_to = 'NGN' then 'ledger_ngn_credit_pending_source_crypto_sweep'
+        else 'treasury_sends_destination_crypto_pending_source_crypto_sweep'
+      end
     )
   )
   returning id into tx_id;
@@ -952,7 +1017,7 @@ begin
       insert into public.ledger_entries (transaction_id, account_id, user_id, entry_role, direction, asset_code, amount, memo)
       values (tx_id, statutory_account_id, null, 'statutory_fee_movement', 'credit', 'NGN', p_statutory_fee_amount, 'Credit statutory fee payable');
     end if;
-  else
+  elsif normalized_to = 'NGN' then
     insert into public.ledger_entries (transaction_id, account_id, user_id, entry_role, direction, asset_code, amount, memo)
     values
       (tx_id, user_from_account_id, p_user_id, 'user_debit', 'debit', normalized_from, p_total_deducted, 'Debit user crypto for conversion amount plus fees'),
@@ -965,6 +1030,19 @@ begin
       insert into public.ledger_entries (transaction_id, account_id, user_id, entry_role, direction, asset_code, amount, memo)
       values (tx_id, treasury_from_account_id, null, 'treasury_movement', 'credit', normalized_from, statutory_source_amount, 'Credit treasury crypto equivalent of statutory levy');
     end if;
+
+    if p_statutory_fee_amount > 0 then
+      insert into public.ledger_entries (transaction_id, account_id, user_id, entry_role, direction, asset_code, amount, memo)
+      values (tx_id, statutory_account_id, null, 'statutory_fee_movement', 'credit', 'NGN', p_statutory_fee_amount, 'Credit statutory fee payable');
+    end if;
+  else
+    insert into public.ledger_entries (transaction_id, account_id, user_id, entry_role, direction, asset_code, amount, memo)
+    values
+      (tx_id, user_from_account_id, p_user_id, 'user_debit', 'debit', normalized_from, p_total_deducted, 'Debit user source crypto for swap amount including fees'),
+      (tx_id, treasury_from_account_id, null, 'treasury_movement', 'credit', normalized_from, p_from_amount + statutory_source_amount, 'Credit treasury source crypto pending sweep'),
+      (tx_id, fee_account_id, null, 'fee_movement', 'credit', normalized_from, p_platform_fee_amount, 'Credit 0.6% platform fee'),
+      (tx_id, treasury_to_account_id, null, 'treasury_movement', 'debit', normalized_to, p_to_amount, 'Debit treasury destination crypto inventory'),
+      (tx_id, user_to_account_id, p_user_id, 'user_credit', 'credit', normalized_to, p_to_amount, 'Credit user destination crypto custody');
 
     if p_statutory_fee_amount > 0 then
       insert into public.ledger_entries (transaction_id, account_id, user_id, entry_role, direction, asset_code, amount, memo)

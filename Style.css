@@ -278,6 +278,12 @@ html, body {
   text-align: right;
   font-weight: 700;
   word-break: break-word;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.short-hash {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  white-space: nowrap;
 }
 
 /* ---- PAGE HEADER ---- */
@@ -523,7 +529,14 @@ html, body {
 @keyframes successPop { from { transform: scale(0.7); opacity: 0; } }
 .success-icon { font-size: 64px; margin-bottom: 16px; }
 .success-card h2 { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
-.success-card p { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.5; }
+.success-card p {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
 
 /* ---- INFO BANNER ---- */
 .info-banner {
@@ -651,7 +664,7 @@ html, body {
 .settlement-item:last-child { border-bottom: none; margin-bottom: 0; }
 .settlement-item:hover { background: rgba(255,255,255,0.055); }
 .si-title { font-weight: 700; color: white; margin-bottom: 3px; }
-.si-detail { color: rgba(255,255,255,0.58); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.si-detail { color: rgba(255,255,255,0.58); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; min-width: 0; }
 .settlement-action {
   display: flex;
   align-items: center;

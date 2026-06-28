@@ -447,6 +447,12 @@
           <!-- Injected by JS -->
         </select>
       </div>
+      <div class="input-group">
+        <label>Pay With</label>
+        <select id="crypto-pay-asset" onchange="App.updateCryptoSendBalance(); App.calcCryptoSendFee();">
+          <!-- Injected by JS -->
+        </select>
+      </div>
       <div class="crypto-balance-display" id="crypto-send-balance">Available: 0 ETH</div>
       <div class="input-group">
         <label>Recipient Wallet Address</label>
@@ -462,7 +468,7 @@
         <div class="fee-row"><span>Amount</span><span id="csend-amount">0 ETH</span></div>
         <div class="fee-row"><span>Network Fee (est.)</span><span id="csend-fee">0 ETH</span></div>
         <div class="fee-row total"><span>Total</span><span id="csend-total">0 ETH</span></div>
-        <div class="fee-row source"><span>Naira value sent</span><span id="csend-naira">₦0</span></div>
+        <div class="fee-row source"><span>Payment source</span><span id="csend-naira">Settled via NairaX Treasury Wallet</span></div>
       </div>
       <div class="input-group">
         <label>Narration (optional)</label>
@@ -625,7 +631,17 @@
       </div>
       <input type="number" id="airtime-amount" placeholder="Enter amount" />
     </div>
-    <button class="btn-primary" onclick="App.buyAirtime()">Buy Airtime</button>
+    <div class="input-group">
+      <label>Pay With</label>
+      <select id="airtime-pay-asset" class="bill-pay-asset" onchange="App.previewBillPayment('airtime')"></select>
+    </div>
+    <div class="fee-breakdown" id="airtime-bill-preview" style="display:none">
+      <div class="fee-row"><span>Amount</span><span id="airtime-bill-amount">NGN 0</span></div>
+      <div class="fee-row"><span>Fee</span><span id="airtime-bill-fee">NGN 0</span></div>
+      <div class="fee-row total"><span>Total Deducted</span><span id="airtime-bill-total">NGN 0</span></div>
+      <div class="fee-row source"><span>Source</span><span id="airtime-bill-source">Naira Balance</span></div>
+    </div>
+    <button class="btn-primary" id="airtime-pay-btn" onclick="App.buyAirtime()">Buy Airtime</button>
     <button class="btn-ghost" onclick="App.closeModal('airtime-modal')">Cancel</button>
   </div>
 </div>
@@ -654,7 +670,17 @@
         <option value="3500">10GB – ₦3,500 (30 days)</option>
       </select>
     </div>
-    <button class="btn-primary" onclick="App.buyData()">Buy Data</button>
+    <div class="input-group">
+      <label>Pay With</label>
+      <select id="data-pay-asset" class="bill-pay-asset" onchange="App.previewBillPayment('data')"></select>
+    </div>
+    <div class="fee-breakdown" id="data-bill-preview" style="display:none">
+      <div class="fee-row"><span>Amount</span><span id="data-bill-amount">NGN 0</span></div>
+      <div class="fee-row"><span>Fee</span><span id="data-bill-fee">NGN 0</span></div>
+      <div class="fee-row total"><span>Total Deducted</span><span id="data-bill-total">NGN 0</span></div>
+      <div class="fee-row source"><span>Source</span><span id="data-bill-source">Naira Balance</span></div>
+    </div>
+    <button class="btn-primary" id="data-pay-btn" onclick="App.buyData()">Buy Data</button>
     <button class="btn-ghost" onclick="App.closeModal('data-modal')">Cancel</button>
   </div>
 </div>
@@ -682,7 +708,17 @@
       <label>Amount (₦)</label>
       <input type="number" id="electricity-amount" placeholder="Minimum ₦1,000" />
     </div>
-    <button class="btn-primary" onclick="App.payElectricity()">Pay Now</button>
+    <div class="input-group">
+      <label>Pay With</label>
+      <select id="electricity-pay-asset" class="bill-pay-asset" onchange="App.previewBillPayment('electricity')"></select>
+    </div>
+    <div class="fee-breakdown" id="electricity-bill-preview" style="display:none">
+      <div class="fee-row"><span>Amount</span><span id="electricity-bill-amount">NGN 0</span></div>
+      <div class="fee-row"><span>Fee</span><span id="electricity-bill-fee">NGN 0</span></div>
+      <div class="fee-row total"><span>Total Deducted</span><span id="electricity-bill-total">NGN 0</span></div>
+      <div class="fee-row source"><span>Source</span><span id="electricity-bill-source">Naira Balance</span></div>
+    </div>
+    <button class="btn-primary" id="electricity-pay-btn" onclick="App.payElectricity()">Pay Now</button>
     <button class="btn-ghost" onclick="App.closeModal('electricity-modal')">Cancel</button>
   </div>
 </div>
@@ -713,7 +749,17 @@
         <option value="3200">GOTV Supa – ₦3,200</option>
       </select>
     </div>
-    <button class="btn-primary" onclick="App.payCable()">Subscribe</button>
+    <div class="input-group">
+      <label>Pay With</label>
+      <select id="cable-pay-asset" class="bill-pay-asset" onchange="App.previewBillPayment('cable')"></select>
+    </div>
+    <div class="fee-breakdown" id="cable-bill-preview" style="display:none">
+      <div class="fee-row"><span>Amount</span><span id="cable-bill-amount">NGN 0</span></div>
+      <div class="fee-row"><span>Fee</span><span id="cable-bill-fee">NGN 0</span></div>
+      <div class="fee-row total"><span>Total Deducted</span><span id="cable-bill-total">NGN 0</span></div>
+      <div class="fee-row source"><span>Source</span><span id="cable-bill-source">Naira Balance</span></div>
+    </div>
+    <button class="btn-primary" id="cable-pay-btn" onclick="App.payCable()">Subscribe</button>
     <button class="btn-ghost" onclick="App.closeModal('cable-modal')">Cancel</button>
   </div>
 </div>

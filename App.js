@@ -76,6 +76,7 @@ const State = {
   currentNetwork: "MTN",
   authBusy: false,
   feePreviewSeq: 0,
+  billPreviewSeq: 0,
   recipientLookupSeq: 0,
   isAdmin: false,
   adminSummary: null,
@@ -128,6 +129,18 @@ const escapeHtml = (value) => String(value ?? "")
   .replace(/'/g, "&#039;");
 
 const formatTxnAmount = (amount, asset) => asset === "NGN" ? fmt(amount) : fmtAsset(amount, asset || "NGN");
+
+function shortHash(value, start = 8, end = 6) {
+  const text = String(value || "");
+  if (!text) return "";
+  if (!/^0x[0-9a-fA-F]{16,}$/.test(text)) return text.length > 28 ? `${text.slice(0, 16)}...${text.slice(-8)}` : text;
+  return text.length > start + end + 5 ? `${text.slice(0, start)}...${text.slice(-end)}` : text;
+}
+
+function txHashHtml(value) {
+  if (!value) return "";
+  return `<span class="short-hash" title="${escapeHtml(value)}">${escapeHtml(shortHash(value))}</span>`;
+}
 
 function friendlyError(error, fallback = "Request failed") {
   const message = error?.message || String(error || "");
@@ -321,7 +334,7 @@ const Ledger = {
         "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({ action, ...payload }),
-    }, action === "me" ? 9000 : (["treasury", "settle_crypto_fees"].includes(action) ? 30000 : 14000));
+    }, action === "me" ? 9000 : (["treasury", "settle_crypto_fees"].includes(action) ? 30000 : (action === "sweep_custodial_wallets" ? 120000 : 14000)));
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || "Admin request failed.");
     return result;
@@ -369,7 +382,7 @@ const Ledger = {
         "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({ action, ...payload }),
-    }, action === "prices" ? 2500 : 9000);
+    }, action === "prices" ? 2500 : (action === "convert" ? 60000 : 20000));
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || "Conversion request failed.");
     return result;
@@ -712,7 +725,7 @@ const App = {
     body.innerHTML = rows.map(([label, value]) => `
       <div class="detail-row">
         <span>${escapeHtml(label)}</span>
-        <strong>${escapeHtml(value)}</strong>
+        <strong>${/hash|transaction id/i.test(label) ? txHashHtml(value) : escapeHtml(value)}</strong>
       </div>
     `).join("");
     App.openModal("transaction-detail-modal");
@@ -775,6 +788,7 @@ const App = {
     if (id === "faucet-modal") App.loadFaucetConfig();
     if (id === "receive-modal") App.loadCryptoConfig();
     if (id === "convert-modal") App.populateConvertModal();
+    if (["airtime-modal", "data-modal", "electricity-modal", "cable-modal"].includes(id)) App.populateBillModal(id.replace("-modal", ""));
   },
 
   closeModal(id) {
@@ -787,6 +801,7 @@ const App = {
     const userPaySel = document.getElementById("user-pay-asset");
     const bankPaySel = document.getElementById("bank-pay-asset");
     const cryptoSel = document.getElementById("crypto-send-asset");
+    const cryptoPaySel = document.getElementById("crypto-pay-asset");
     if (!user || !userSel || !cryptoSel) return;
 
     const options = user.balances.map((balance) => {
@@ -799,6 +814,10 @@ const App = {
     if (bankPaySel) bankPaySel.value = "NGN";
     if (userPaySel) userPaySel.value = userSel.value || "NGN";
     cryptoSel.innerHTML = user.cryptoAssets.map((asset) => `<option value="${asset.symbol}">${asset.symbol}</option>`).join("");
+    if (cryptoPaySel) {
+      cryptoPaySel.innerHTML = options;
+      cryptoPaySel.value = cryptoSel.value || "USDCX";
+    }
     App.updateCryptoSendBalance();
     App.calcSendFee();
   },
@@ -845,14 +864,18 @@ const App = {
       });
       State.conversionPreview = preview;
       document.getElementById("convert-preview").style.display = "block";
-      document.getElementById("convert-rate").textContent = `1 ${fromAsset === "NGN" ? toAsset : fromAsset} = ${fmt(preview.rate_used)}`;
+      document.getElementById("convert-rate").textContent = preview.direction === "crypto_crypto_conversion"
+        ? `1 ${fromAsset} = ${Number(preview.rate_used || 0).toLocaleString("en-NG", { maximumFractionDigits: 8 })} ${toAsset}`
+        : `1 ${fromAsset === "NGN" ? toAsset : fromAsset} = ${fmt(preview.rate_used)}`;
       document.getElementById("convert-fee-platform").textContent = formatTxnAmount(preview.platform_fee_amount, preview.fee_asset);
       document.getElementById("convert-fee-statutory").textContent = preview.direction === "crypto_ngn_conversion"
         ? `${fmt(preview.statutory_fee_amount)} (${formatTxnAmount(preview.statutory_fee_source_amount, preview.fee_asset)})`
         : fmt(preview.statutory_fee_amount);
       document.getElementById("convert-total").textContent = formatTxnAmount(preview.total_deducted, fromAsset);
       document.getElementById("convert-receives").textContent = formatTxnAmount(preview.receiver_gets, toAsset);
-      document.getElementById("convert-rate-source").textContent = `Rate source: ${preview.rate_source}; NGN/USD ${Number(preview.applied_ngn_usd_rate || 0).toLocaleString("en-NG")} (${preview.direction === "ngn_crypto_conversion" ? "buy" : "sell"} spread ${Number(preview.spread_ngn || 0).toLocaleString("en-NG")})`;
+      document.getElementById("convert-rate-source").textContent = preview.direction === "crypto_crypto_conversion"
+        ? `Rate source: ${preview.rate_source}; sell ${Number(preview.source_applied_ngn_usd_rate || 0).toLocaleString("en-NG")} / buy ${Number(preview.destination_applied_ngn_usd_rate || 0).toLocaleString("en-NG")} (spread ${Number(preview.spread_ngn || 0).toLocaleString("en-NG")})`
+        : `Rate source: ${preview.rate_source}; NGN/USD ${Number(preview.applied_ngn_usd_rate || 0).toLocaleString("en-NG")} (${preview.direction === "ngn_crypto_conversion" ? "buy" : "sell"} spread ${Number(preview.spread_ngn || 0).toLocaleString("en-NG")})`;
     } catch (error) {
       App.toast(error.message || "Conversion preview failed");
     } finally {
@@ -880,7 +903,13 @@ const App = {
       await Ledger.loadCurrentUser();
       await App.renderHome();
       const preview = result.preview || State.conversionPreview;
-      App.showSuccess("Conversion Complete", `${formatTxnAmount(preview.from_amount, fromAsset)} converted to ${formatTxnAmount(preview.receiver_gets, toAsset)}.\nRate: ${fmt(preview.rate_used)} per ${fromAsset === "NGN" ? toAsset : fromAsset}`);
+      const settlement = result.settlement || {};
+      const txLine = settlement.treasury_tx_hash ? `\nTreasury tx: ${shortHash(settlement.treasury_tx_hash)}` : "";
+      const feeLine = settlement.fee_tx_hash ? `\nFee tx: ${shortHash(settlement.fee_tx_hash)}` : "";
+      const rateLine = preview.direction === "crypto_crypto_conversion"
+        ? `Rate: 1 ${fromAsset} = ${Number(preview.rate_used || 0).toLocaleString("en-NG", { maximumFractionDigits: 8 })} ${toAsset}`
+        : `Rate: ${fmt(preview.rate_used)} per ${fromAsset === "NGN" ? toAsset : fromAsset}`;
+      App.showSuccess("Swap Complete", `${formatTxnAmount(preview.total_deducted || preview.from_amount, fromAsset)} swapped to ${formatTxnAmount(preview.receiver_gets, toAsset)}.\n${rateLine}${txLine}${feeLine}`);
     } catch (error) {
       App.toast(error.message || "Conversion failed");
     } finally {
@@ -1020,9 +1049,11 @@ const App = {
   updateCryptoSendBalance() {
     const user = DB.getUser();
     const sym = document.getElementById("crypto-send-asset")?.value;
-    const asset = user?.cryptoAssets.find((a) => a.symbol === sym);
+    const payAsset = document.getElementById("crypto-pay-asset")?.value || sym;
+    const asset = user?.balances.find((a) => a.asset_code === payAsset)
+      || user?.cryptoAssets.find((a) => a.symbol === sym);
     const el = document.getElementById("crypto-send-balance");
-    if (el) el.textContent = asset ? `Available: ${fmtAsset(asset.amount, sym)}` : "No balance";
+    if (el) el.textContent = asset ? `Available to pay: ${fmtAsset(asset.available ?? asset.amount, payAsset)}` : "No balance";
   },
 
   validateCryptoAddress() {
@@ -1047,6 +1078,7 @@ const App = {
   async previewExternalCryptoWithdrawal() {
     const amount = Number(document.getElementById("crypto-send-amount")?.value || 0);
     const sym = document.getElementById("crypto-send-asset")?.value || "ETHX";
+    const payAsset = document.getElementById("crypto-pay-asset")?.value || sym;
     if (amount <= 0) {
       document.getElementById("crypto-fee-breakdown").style.display = "none";
       return;
@@ -1060,10 +1092,17 @@ const App = {
       const preview = await Ledger.callCrypto("withdrawal_preview", {
         network: document.getElementById("crypto-send-network")?.value || "Arc Testnet",
         symbol: sym,
+        pay_asset: payAsset,
         amount,
       });
-      document.getElementById("csend-fee").textContent = `Platform ${fmtAsset(preview.platform_fee, sym)} + Gas ${fmtAsset(preview.gas_fee_estimate, sym)}`;
-      document.getElementById("csend-total").textContent = fmtAsset(preview.total_deducted, sym);
+      const conversionFee = preview.conversion_required
+        ? ` + Convert ${fmtAsset(preview.conversion_fee_amount || 0, preview.pay_asset || payAsset)}`
+        : "";
+      document.getElementById("csend-fee").textContent = `External ${fmtAsset(preview.platform_fee, sym)} + Gas ${fmtAsset(preview.gas_fee_estimate, sym)}${conversionFee}`;
+      document.getElementById("csend-total").textContent = fmtAsset(preview.total_deducted, preview.pay_asset || payAsset);
+      document.getElementById("csend-naira").textContent = preview.conversion_required
+        ? `Pay ${fmtAsset(preview.total_deducted, preview.pay_asset || payAsset)}; treasury sends ${fmtAsset(preview.amount, sym)}`
+        : "Settled via NairaX Treasury Wallet";
     } catch (error) {
       document.getElementById("csend-fee").textContent = error.message || "Fee preview failed";
     }
@@ -1143,6 +1182,7 @@ const App = {
   async _sendExternalCrypto() {
     const network = document.getElementById("crypto-send-network")?.value || "Arc Testnet";
     const symbol = document.getElementById("crypto-send-asset")?.value || "";
+    const payAsset = document.getElementById("crypto-pay-asset")?.value || symbol;
     const recipient = document.getElementById("crypto-send-address")?.value.trim() || "";
     const amount = Number(document.getElementById("crypto-send-amount")?.value || 0);
     if (!symbol) return App.toast("Select a token");
@@ -1151,11 +1191,11 @@ const App = {
 
     App.setActionBusy("send-main-btn", true, "Sending...");
     try {
-      const result = await Ledger.callCrypto("external_withdrawal", { network, symbol, recipient, amount });
+      const result = await Ledger.callCrypto("external_withdrawal", { network, symbol, pay_asset: payAsset, recipient, amount });
       App.closeModal("send-modal");
       await Ledger.loadCurrentUser();
       await App.renderHome();
-      App.showSuccess("External Crypto Sent", `${fmtAsset(result.amount, result.symbol)} sent to external wallet.\nTx: ${result.tx_hash}`);
+      App.showSuccess("External Crypto Sent", `${fmtAsset(result.amount, result.symbol)} sent to external wallet.\nPaid with ${fmtAsset(result.total_deducted, result.pay_asset || result.symbol)}.\nTx: ${shortHash(result.tx_hash)}`);
     } catch (error) {
       App.toast(error.message || "External crypto send failed");
     } finally {
@@ -1230,7 +1270,7 @@ const App = {
       const result = await Ledger.callCrypto("verify_deposit", { network, symbol, txHash });
       await Ledger.loadCurrentUser();
       await App.renderHome();
-      App.showSuccess("Deposit Verified", `${fmtAsset(result.amount, result.symbol)} credited.\nTx: ${result.tx_hash}`);
+      App.showSuccess("Deposit Verified", `${fmtAsset(result.amount, result.symbol)} credited.\nTx: ${shortHash(result.tx_hash)}`);
     } catch (error) {
       App.toast(error.message || "Deposit verification failed");
     } finally {
@@ -1290,7 +1330,7 @@ const App = {
       : "Demo tokens run on testnets and have no real value.";
     if (hash) {
       hash.innerHTML = claim?.tx_hash
-        ? `<a href="${escapeHtml(App.explorerTxUrl(token, claim.tx_hash) || "#")}" target="_blank" rel="noreferrer">${escapeHtml(claim.tx_hash)}</a>`
+        ? `<a class="short-hash" title="${escapeHtml(claim.tx_hash)}" href="${escapeHtml(App.explorerTxUrl(token, claim.tx_hash) || "#")}" target="_blank" rel="noreferrer">${escapeHtml(shortHash(claim.tx_hash))}</a>`
         : "";
     }
     if (button) button.disabled = Boolean(claim && claim.status !== "failed") || !token;
@@ -1311,8 +1351,8 @@ const App = {
       await Ledger.loadCurrentUser();
       App.renderHome();
       await App.loadFaucetConfig();
-      const link = result.explorer_url ? `\n${result.explorer_url}` : "";
-      App.showSuccess("Demo Token Funded", `${formatTxnAmount(result.amount, result.symbol)} sent on ${result.network}.\nTx: ${result.tx_hash}${link}`);
+      const explorerLine = result.explorer_url ? "\nExplorer link is available in faucet history." : "";
+      App.showSuccess("Demo Token Funded", `${formatTxnAmount(result.amount, result.symbol)} sent on ${result.network}.\nTx: ${shortHash(result.tx_hash)}${explorerLine}`);
     } catch (error) {
       App.toast(error.message || "Faucet request failed");
     } finally {
@@ -1339,12 +1379,150 @@ const App = {
     el.closest(".network-grid").querySelectorAll(".net-item").forEach((i) => i.classList.remove("active-net"));
     el.classList.add("active-net");
     State.currentNetwork = net;
+    const modal = el.closest(".modal-overlay");
+    if (modal?.id === "airtime-modal") App.previewBillPayment("airtime");
+    if (modal?.id === "data-modal") App.previewBillPayment("data");
   },
 
-  buyAirtime() { App.toast("Bills are not implemented in Phase 1"); },
-  buyData() { App.toast("Bills are not implemented in Phase 1"); },
-  payElectricity() { App.toast("Bills are not implemented in Phase 1"); },
-  payCable() { App.toast("Bills are not implemented in Phase 1"); },
+  populateBillModal(type) {
+    const user = DB.getUser();
+    const select = document.getElementById(`${type}-pay-asset`);
+    if (!user || !select) return;
+    const previous = select.value || "NGN";
+    select.innerHTML = user.balances.map((balance) => {
+      const label = balance.asset_code === "NGN" ? "Nigerian Naira" : `${balance.asset_code} ledger balance`;
+      return `<option value="${balance.asset_code}">${label}</option>`;
+    }).join("");
+    select.value = user.balances.some((balance) => balance.asset_code === previous) ? previous : "NGN";
+    App.previewBillPayment(type);
+  },
+
+  getBillPayload(type) {
+    if (type === "airtime") {
+      return {
+        modalId: "airtime-modal",
+        buttonId: "airtime-pay-btn",
+        title: "Airtime Purchase",
+        provider: State.currentNetwork || "MTN",
+        identifier: document.getElementById("airtime-phone")?.value.trim() || "",
+        amount: Number(document.getElementById("airtime-amount")?.value || 0),
+        payAsset: document.getElementById("airtime-pay-asset")?.value || "NGN",
+        narration: `Simulated airtime purchase for ${document.getElementById("airtime-phone")?.value.trim() || "phone"}`,
+      };
+    }
+    if (type === "data") {
+      const plan = document.getElementById("data-plan");
+      return {
+        modalId: "data-modal",
+        buttonId: "data-pay-btn",
+        title: "Data Purchase",
+        provider: State.currentNetwork || "MTN",
+        identifier: document.getElementById("data-phone")?.value.trim() || "",
+        amount: Number(plan?.value || 0),
+        payAsset: document.getElementById("data-pay-asset")?.value || "NGN",
+        narration: `Simulated ${plan?.selectedOptions?.[0]?.textContent || "data"} purchase`,
+      };
+    }
+    if (type === "electricity") {
+      return {
+        modalId: "electricity-modal",
+        buttonId: "electricity-pay-btn",
+        title: "Electricity Payment",
+        provider: document.getElementById("disco-select")?.value || "Electricity",
+        identifier: document.getElementById("meter-number")?.value.trim() || "",
+        amount: Number(document.getElementById("electricity-amount")?.value || 0),
+        payAsset: document.getElementById("electricity-pay-asset")?.value || "NGN",
+        narration: `Simulated electricity payment for meter ${document.getElementById("meter-number")?.value.trim() || ""}`,
+      };
+    }
+    const pack = document.getElementById("cable-package");
+    return {
+      modalId: "cable-modal",
+      buttonId: "cable-pay-btn",
+      title: "Cable TV Subscription",
+      provider: document.getElementById("cable-provider")?.value || "Cable TV",
+      identifier: document.getElementById("cable-card")?.value.trim() || "",
+      amount: Number(pack?.value || 0),
+      payAsset: document.getElementById("cable-pay-asset")?.value || "NGN",
+      narration: `Simulated ${pack?.selectedOptions?.[0]?.textContent || "cable"} subscription`,
+    };
+  },
+
+  async previewBillPayment(type) {
+    const payload = App.getBillPayload(type);
+    const previewBox = document.getElementById(`${type}-bill-preview`);
+    if (!previewBox) return null;
+    if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
+      previewBox.style.display = "none";
+      return null;
+    }
+    previewBox.style.display = "block";
+    document.getElementById(`${type}-bill-amount`).textContent = fmt(payload.amount);
+    document.getElementById(`${type}-bill-fee`).textContent = "Checking...";
+    document.getElementById(`${type}-bill-total`).textContent = formatTxnAmount(payload.amount, payload.payAsset);
+    document.getElementById(`${type}-bill-source`).textContent = `Pay with ${payload.payAsset}`;
+    const seq = ++State.billPreviewSeq;
+    try {
+      const preview = await Ledger.callSmartSpend("preview", {
+        recipient_type: "bill_payment",
+        recipient_identifier: payload.identifier || `${type}-${Date.now()}`,
+        bankName: payload.provider,
+        accountName: payload.title,
+        receive_asset: "NGN",
+        receive_amount: payload.amount,
+        preferred_pay_asset: payload.payAsset,
+        narration: payload.narration,
+      });
+      if (seq !== State.billPreviewSeq) return null;
+      const selected = preview.selected || {};
+      const feeText = Number(selected.platform_fee_amount || 0)
+        ? `Platform ${formatTxnAmount(selected.platform_fee_amount, selected.source_asset)}`
+        : "No fee";
+      document.getElementById(`${type}-bill-fee`).textContent = feeText;
+      document.getElementById(`${type}-bill-total`).textContent = formatTxnAmount(selected.total_deducted, selected.source_asset);
+      document.getElementById(`${type}-bill-source`).textContent = selected.conversion_required
+        ? `Pay with ${selected.source_asset}; spread ${Number(selected.spread_ngn || 0).toLocaleString("en-NG")}`
+        : `Pay directly with ${selected.source_asset}`;
+      return preview;
+    } catch (error) {
+      if (seq !== State.billPreviewSeq) return null;
+      document.getElementById(`${type}-bill-fee`).textContent = friendlyError(error, "Preview failed");
+      return null;
+    }
+  },
+
+  async payBill(type) {
+    const payload = App.getBillPayload(type);
+    if (!payload.identifier) return App.toast("Enter the bill recipient details");
+    if (!Number.isFinite(payload.amount) || payload.amount <= 0) return App.toast("Enter a valid amount");
+    App.setActionBusy(payload.buttonId, true, "Paying...");
+    try {
+      const result = await Ledger.callSmartSpend("execute", {
+        recipient_type: "bill_payment",
+        recipient_identifier: payload.identifier,
+        bankName: payload.provider,
+        accountName: payload.title,
+        receive_asset: "NGN",
+        receive_amount: payload.amount,
+        preferred_pay_asset: payload.payAsset,
+        narration: payload.narration,
+      });
+      App.closeModal(payload.modalId);
+      await App.renderHome();
+      const selected = result.preview?.selected || {};
+      App.showSuccess(payload.title, `${fmt(payload.amount)} paid to ${payload.provider}.\nDeducted ${formatTxnAmount(selected.total_deducted || payload.amount, selected.source_asset || payload.payAsset)}.\nSimulated bill payment only.`);
+    } catch (error) {
+      App.toast(friendlyError(error, "Bill payment failed"));
+    } finally {
+      const labels = { airtime: "Buy Airtime", data: "Buy Data", electricity: "Pay Now", cable: "Subscribe" };
+      App.setActionBusy(payload.buttonId, false, labels[type] || "Pay");
+    }
+  },
+
+  buyAirtime() { return App.payBill("airtime"); },
+  buyData() { return App.payBill("data"); },
+  payElectricity() { return App.payBill("electricity"); },
+  payCable() { return App.payBill("cable"); },
 
   requirePin() {
     App.toast("PIN authorization is not needed in Phase 1");
@@ -1635,7 +1813,7 @@ const App = {
         .map((row) => `
           <div class="settlement-item">
             <div class="si-title">${escapeHtml(row.asset_symbol)} settlement - ${escapeHtml(row.status)}</div>
-            <div class="si-detail">${formatTxnAmount(row.amount, row.asset_symbol)} - ${escapeHtml(row.tx_hash || row.failure_reason || "pending")}</div>
+            <div class="si-detail">${formatTxnAmount(row.amount, row.asset_symbol)} - ${row.tx_hash ? txHashHtml(row.tx_hash) : escapeHtml(row.failure_reason || "pending")}</div>
           </div>
         `).join("");
       const feeSettlementRows = (summary.crypto_withdrawals || [])
@@ -1644,7 +1822,7 @@ const App = {
         .map((row) => `
           <div class="settlement-item">
             <div class="si-title">${escapeHtml(row.token_symbol)} fee settlement - ${escapeHtml(row.fee_settlement_status || "unknown")}</div>
-            <div class="si-detail">${formatTxnAmount(row.platform_fee || 0, row.token_symbol)} - ${escapeHtml(row.fee_tx_hash || row.fee_settlement_error || "")}</div>
+            <div class="si-detail">${formatTxnAmount(row.platform_fee || 0, row.token_symbol)} - ${row.fee_tx_hash ? txHashHtml(row.fee_tx_hash) : escapeHtml(row.fee_settlement_error || "")}</div>
           </div>
         `).join("");
       panel.innerHTML = [
@@ -1738,13 +1916,45 @@ const App = {
       panel.innerHTML = (summary.faucet_claims || []).map((claim) => `
         <div class="settlement-item">
           <div class="si-title">${escapeHtml(claim.token_symbol)} · ${escapeHtml(claim.network)} · ${escapeHtml(claim.status)}</div>
-          <div class="si-detail">${formatTxnAmount(claim.amount, claim.token_symbol)} · ${escapeHtml(claim.tx_hash || "no tx hash yet")}</div>
+          <div class="si-detail">${formatTxnAmount(claim.amount, claim.token_symbol)} · ${claim.tx_hash ? txHashHtml(claim.tx_hash) : "no tx hash yet"}</div>
         </div>
       `).join("") || '<p class="admin-empty">No faucet claims yet</p>';
       return;
     }
 
     if (State.adminTab === "treasury") {
+      const tokenOptions = (State.adminData.tokens?.supported_tokens || State.adminSummary?.supported_tokens || summary.treasury_token_balances || [])
+        .filter((row) => row.symbol && row.symbol !== "NGN")
+        .map((row) => `<option value="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</option>`)
+        .join("");
+      const balances = (summary.treasury_token_balances || []).map((row) => `
+        <div class="settlement-item">
+          <div class="si-title">${escapeHtml(row.symbol)} - ${escapeHtml(row.network)}</div>
+          <div class="si-detail">${row.balance === null ? escapeHtml(row.error || "Unavailable") : formatTxnAmount(row.balance, row.symbol)} - ${escapeHtml(row.wallet_address || "")}</div>
+        </div>
+      `).join("") || '<p class="admin-empty">No treasury balances available</p>';
+      panel.innerHTML = `
+        <div class="settlement-action">
+          <div>
+            <div class="si-title">Sweep Custodial Wallets</div>
+            <div class="si-detail">Treasury tops up gas where needed, then sweeps selected ERC20 balances back to treasury.</div>
+          </div>
+        </div>
+        <div class="admin-token-form">
+          <input id="sweep-network" value="Arc Testnet" placeholder="Network" />
+          <select id="sweep-symbol">${tokenOptions || '<option value="USDCX">USDCX</option><option value="EURCX">EURCX</option><option value="ETHX">ETHX</option><option value="cirBTCX">cirBTCX</option>'}</select>
+          <input id="sweep-limit" type="number" min="1" max="10" value="5" placeholder="Wallet limit" />
+          <input id="sweep-gas-topup" value="0.001" placeholder="Native gas top-up" />
+          <button class="admin-btn green" id="sweep-wallets-btn" onclick="App.sweepCustodialWallets()">Sweep Wallets</button>
+        </div>
+        <div id="sweep-results"></div>
+        <div class="admin-section-title">Treasury Balances</div>
+        ${balances}
+      `;
+      return;
+    }
+
+    if (State.adminTab === "treasury-old") {
       panel.innerHTML = (summary.treasury_token_balances || []).map((row) => `
         <div class="settlement-item">
           <div class="si-title">${escapeHtml(row.symbol)} · ${escapeHtml(row.network)}</div>
@@ -1758,7 +1968,7 @@ const App = {
       panel.innerHTML = (summary.crypto_deposits || []).map((row) => `
         <div class="settlement-item">
           <div class="si-title">${escapeHtml(row.token_symbol)} · ${escapeHtml(row.network)} · ${escapeHtml(row.status)}</div>
-          <div class="si-detail">${formatTxnAmount(row.amount, row.token_symbol)} · ${escapeHtml(row.tx_hash || "")}</div>
+          <div class="si-detail">${formatTxnAmount(row.amount, row.token_symbol)} · ${row.tx_hash ? txHashHtml(row.tx_hash) : ""}</div>
         </div>
       `).join("") || '<p class="admin-empty">No crypto deposits yet</p>';
       return;
@@ -1768,7 +1978,7 @@ const App = {
       panel.innerHTML = (summary.crypto_withdrawals || []).map((row) => `
         <div class="settlement-item">
           <div class="si-title">${escapeHtml(row.token_symbol)} · ${escapeHtml(row.network)} · ${escapeHtml(row.status)}</div>
-          <div class="si-detail">${formatTxnAmount(row.amount, row.token_symbol)} · fee ${formatTxnAmount(Number(row.platform_fee || 0) + Number(row.gas_fee_estimate || 0), row.token_symbol)} · ${escapeHtml(row.tx_hash || row.failure_reason || "")}</div>
+          <div class="si-detail">${formatTxnAmount(row.amount, row.token_symbol)} · fee ${formatTxnAmount(Number(row.platform_fee || 0) + Number(row.gas_fee_estimate || 0), row.token_symbol)} · ${row.tx_hash ? txHashHtml(row.tx_hash) : escapeHtml(row.failure_reason || "")}</div>
         </div>
       `).join("") || '<p class="admin-empty">No crypto withdrawals yet</p>';
       return;
@@ -1856,13 +2066,48 @@ const App = {
         amount,
       });
       const txHash = result.settlement?.tx_hash || "pending";
-      App.toast(`Fee settlement submitted: ${txHash}`);
+      App.toast(`Fee settlement submitted: ${shortHash(txHash)}`);
       await App.renderAdmin();
       App.switchAdminTab("fees");
     } catch (error) {
       App.toast(friendlyError(error, "Fee settlement failed"));
       await App.renderAdmin();
       App.switchAdminTab("fees");
+    }
+  },
+
+  async sweepCustodialWallets() {
+    const symbol = document.getElementById("sweep-symbol")?.value || "USDCX";
+    const network = document.getElementById("sweep-network")?.value.trim() || "Arc Testnet";
+    const limit = Number(document.getElementById("sweep-limit")?.value || 10);
+    const gasTopUp = document.getElementById("sweep-gas-topup")?.value.trim() || "0.001";
+    const resultsEl = document.getElementById("sweep-results");
+    if (!confirm(`Sweep up to ${limit} custodial wallets for ${symbol} on ${network}?`)) return;
+    App.setActionBusy("sweep-wallets-btn", true, "Sweeping...");
+    if (resultsEl) resultsEl.innerHTML = '<p class="admin-empty">Sweeping wallets...</p>';
+    try {
+      const result = await Ledger.callAdmin("sweep_custodial_wallets", {
+        network,
+        symbol,
+        limit,
+        gas_top_up: gasTopUp,
+      });
+      const rows = result.sweep?.results || [];
+      if (resultsEl) {
+        resultsEl.innerHTML = rows.map((row) => `
+          <div class="settlement-item">
+            <div class="si-title">${escapeHtml(row.status)} - ${escapeHtml(row.symbol)} - ${formatTxnAmount(row.swept_amount || 0, row.symbol)}</div>
+            <div class="si-detail">${txHashHtml(row.wallet_address || "")} - gas ${row.gas_top_up_tx_hash ? txHashHtml(row.gas_top_up_tx_hash) : "none"} - sweep ${row.sweep_tx_hash ? txHashHtml(row.sweep_tx_hash) : escapeHtml(row.reason || "none")}</div>
+          </div>
+        `).join("") || '<p class="admin-empty">No wallets swept</p>';
+      }
+      App.toast("Sweep completed");
+    } catch (error) {
+      const message = friendlyError(error, "Sweep failed");
+      if (resultsEl) resultsEl.innerHTML = `<p class="admin-empty">${escapeHtml(message)}</p>`;
+      App.toast(message);
+    } finally {
+      App.setActionBusy("sweep-wallets-btn", false, "Sweep Wallets");
     }
   },
 
@@ -1877,6 +2122,23 @@ const App = {
 
 document.addEventListener("DOMContentLoaded", () => {
   App.init();
+  [
+    ["airtime-amount", "airtime"],
+    ["airtime-phone", "airtime"],
+    ["data-phone", "data"],
+    ["data-plan", "data"],
+    ["electricity-amount", "electricity"],
+    ["meter-number", "electricity"],
+    ["disco-select", "electricity"],
+    ["cable-package", "cable"],
+    ["cable-provider", "cable"],
+    ["cable-card", "cable"],
+  ].forEach(([id, type]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("input", () => App.previewBillPayment(type));
+    el.addEventListener("change", () => App.previewBillPayment(type));
+  });
   document.querySelectorAll("[data-admin-tab]").forEach((button) => {
     button.onclick = null;
   });

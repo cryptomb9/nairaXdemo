@@ -121,6 +121,14 @@ function externalNgnFees(amount, usedCount) {
   return { platformFee, statutoryFee, totalFee: platformFee + statutoryFee, usedCount };
 }
 
+function billPaymentFees(amount, payAsset) {
+  if (payAsset === "NGN") {
+    return { platformFee: 0, statutoryFee: 0, statutorySource: 0, totalFee: 0 };
+  }
+  const platformFee = roundAsset(amount * 0.006, payAsset);
+  return { platformFee, statutoryFee: 0, statutorySource: 0, totalFee: platformFee };
+}
+
 async function buildCandidate(supabase, input, payAsset, balances, externalNgnUsed) {
   const receiveAsset = input.receive_asset;
   const receiveAmount = input.receive_amount;
@@ -187,9 +195,10 @@ async function buildCandidate(supabase, input, payAsset, balances, externalNgnUs
   if (CRYPTO_ASSETS.has(payAsset) && receiveAsset === "NGN") {
     const rate = getLocalRate(payAsset, "crypto_ngn_conversion");
     const sourceAmount = roundAsset(receiveAmount / rate.rate, payAsset);
-    const platformFee = roundAsset(sourceAmount * 0.006, payAsset);
-    const statutoryFee = receiveAmount >= 10000 ? 50 : 0;
-    const statutorySource = statutoryFee > 0 ? roundAsset(statutoryFee / rate.rate, payAsset) : 0;
+    const billFees = recipientType === "bill_payment" ? billPaymentFees(sourceAmount, payAsset) : null;
+    const platformFee = billFees ? billFees.platformFee : roundAsset(sourceAmount * 0.006, payAsset);
+    const statutoryFee = billFees ? 0 : (receiveAmount >= 10000 ? 50 : 0);
+    const statutorySource = billFees ? 0 : (statutoryFee > 0 ? roundAsset(statutoryFee / rate.rate, payAsset) : 0);
     const totalDeducted = roundAsset(sourceAmount + platformFee + statutorySource, payAsset);
     return {
       source_asset: payAsset,
@@ -223,11 +232,12 @@ async function buildPreview(supabase, userId, body) {
     ? normalizeAsset(body.preferred_pay_asset || body.preferredPayAsset)
     : null;
 
-  if (!["nairax_user", "external_bank", "external_wallet"].includes(recipientType)) {
+  if (!["nairax_user", "external_bank", "external_wallet", "bill_payment"].includes(recipientType)) {
     throw new Error("Unsupported recipient type.");
   }
   if (!ASSETS.includes(receiveAsset)) throw new Error("Unsupported receive asset.");
   if (recipientType === "external_bank" && receiveAsset !== "NGN") throw new Error("External bank recipients must receive NGN.");
+  if (recipientType === "bill_payment" && receiveAsset !== "NGN") throw new Error("Bill payments must settle in NGN.");
   if (recipientType === "external_wallet") throw new Error("Smart Spend auto-conversion for external wallets is not enabled yet. Use direct external crypto send.");
 
   const balances = await getBalances(supabase, userId);

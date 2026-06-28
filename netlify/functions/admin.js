@@ -2,6 +2,7 @@
 
 const { createClient } = require("@supabase/supabase-js");
 const { ethers } = require("ethers");
+const crypto = require("crypto");
 const { getAssetPrices } = require("./conversions");
 
 const headers = {
@@ -116,6 +117,30 @@ function getFeeWalletAddress() {
   const privateKey = process.env.FEE_WALLET_PRIVATE_KEY;
   if (!privateKey) throw new Error("FEE_WALLET_PRIVATE_KEY is not configured.");
   return new ethers.Wallet(privateKey).address;
+}
+
+function decryptPrivateKey(encryptedPrivateKey) {
+  const secret = process.env.WALLET_ENCRYPTION_SECRET;
+  if (!secret || secret.length < 32) throw new Error("WALLET_ENCRYPTION_SECRET must be set to at least 32 characters.");
+  const payload = JSON.parse(encryptedPrivateKey);
+  const key = crypto.createHash("sha256").update(secret).digest();
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(payload.iv, "base64"));
+  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(payload.ciphertext, "base64")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+function getWaitConfirmations(envName, fallback = 0) {
+  const raw = Number(process.env[envName] ?? fallback);
+  if (!Number.isFinite(raw) || raw < 0) return fallback;
+  return Math.floor(raw);
+}
+
+async function maybeWaitForTx(tx, confirmations) {
+  if (!confirmations) return null;
+  return tx.wait(confirmations);
 }
 
 async function getLedgerFeeRevenue(supabase) {
@@ -277,6 +302,82 @@ async function settleCryptoFees(supabase, adminUserId, body) {
       .eq("id", settlement.id);
     throw error;
   }
+}
+
+async function sweepCustodialWallets(supabase, body) {
+  const network = String(body.network || "Arc Testnet");
+  const symbol = normalizeSymbol(body.asset_symbol || body.symbol);
+  const limit = Math.max(1, Math.min(Number(body.limit || 5), 10));
+  const token = await getToken(supabase, symbol, network);
+  const provider = getProvider(network);
+  if (!provider) throw new Error(`${network} RPC is not configured.`);
+
+  const treasury = getTreasuryWallet(provider);
+  const gasTopUpEth = String(body.gas_top_up || process.env.SWEEP_GAS_TOPUP_NATIVE || "0.001");
+  const gasTopUp = ethers.parseEther(gasTopUpEth);
+  const minGas = gasTopUp / 3n;
+  const waitConfirmations = getWaitConfirmations("SWEEP_WAIT_CONFIRMATIONS", 0);
+  const treasuryContract = new ethers.Contract(token.contract_address, ERC20_ABI, treasury);
+  const treasuryAddress = treasury.address;
+
+  const { data: wallets, error } = await supabase
+    .from("custodial_wallets")
+    .select("user_id, wallet_address, encrypted_private_key")
+    .eq("chain_type", "EVM")
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+
+  const results = [];
+  for (const row of wallets || []) {
+    const result = {
+      user_id: row.user_id,
+      wallet_address: row.wallet_address,
+      symbol: token.symbol,
+      gas_top_up_tx_hash: null,
+      sweep_tx_hash: null,
+      swept_amount: 0,
+      status: "skipped",
+      reason: null,
+    };
+    try {
+      if (!ethers.isAddress(row.wallet_address)) throw new Error("Invalid wallet address.");
+      const tokenBalance = await treasuryContract.balanceOf(row.wallet_address);
+      if (tokenBalance <= 0n) {
+        result.reason = "No token balance to sweep.";
+        results.push(result);
+        continue;
+      }
+
+      const nativeBalance = await provider.getBalance(row.wallet_address);
+      if (nativeBalance < minGas) {
+        const gasTx = await treasury.sendTransaction({ to: row.wallet_address, value: gasTopUp });
+        await maybeWaitForTx(gasTx, waitConfirmations);
+        result.gas_top_up_tx_hash = gasTx.hash;
+        result.status = "gas_topped_up";
+        result.reason = "Gas top-up submitted. Run sweep again after it confirms.";
+        results.push(result);
+        continue;
+      }
+
+      const userWallet = new ethers.Wallet(decryptPrivateKey(row.encrypted_private_key), provider);
+      if (userWallet.address.toLowerCase() !== row.wallet_address.toLowerCase()) {
+        throw new Error("Encrypted key does not match wallet address.");
+      }
+      const userContract = new ethers.Contract(token.contract_address, ERC20_ABI, userWallet);
+      const sweepTx = await userContract.transfer(treasuryAddress, tokenBalance);
+      await maybeWaitForTx(sweepTx, waitConfirmations);
+      result.sweep_tx_hash = sweepTx.hash;
+      result.swept_amount = Number(ethers.formatUnits(tokenBalance, Number(token.decimals)));
+      result.status = waitConfirmations ? "completed" : "submitted";
+    } catch (sweepError) {
+      result.status = "failed";
+      result.reason = sweepError.message || "Sweep failed.";
+    }
+    results.push(result);
+  }
+
+  return { network, symbol: token.symbol, treasury_wallet_address: treasuryAddress, results };
 }
 
 async function syncPlatformWallets(supabase) {
@@ -599,6 +700,9 @@ exports.handler = async (event) => {
     }
     if (action === "settle_crypto_fees") {
       return json(200, { settlement: await settleCryptoFees(supabase, user.id, body) });
+    }
+    if (action === "sweep_custodial_wallets") {
+      return json(200, { sweep: await sweepCustodialWallets(supabase, body) });
     }
     if (action !== "summary") {
       return json(200, await buildAdminTab(supabase, action));

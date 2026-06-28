@@ -1,6 +1,8 @@
 "use strict";
 
 const { createClient } = require("@supabase/supabase-js");
+const { ethers } = require("ethers");
+const crypto = require("crypto");
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -29,6 +31,15 @@ const STATIC_USD_FALLBACKS = {
 const PRICE_CACHE_TTL_MS = 5 * 60 * 1000;
 let priceCache = null;
 const rateSaveWarnings = new Set();
+
+const ERC20_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function transfer(address to, uint256 amount) returns (bool)",
+];
+
+const NETWORKS = {
+  "Arc Testnet": { env: "ARC_TESTNET_RPC_URL", chainId: 5042002 },
+};
 
 function json(statusCode, body) {
   return { statusCode, headers, body: JSON.stringify(body) };
@@ -65,6 +76,16 @@ function roundAsset(value, asset) {
   const decimals = asset === "NGN" ? 2 : 8;
   const factor = 10 ** decimals;
   return Math.round(Number(value) * factor) / factor;
+}
+
+function roundToDecimals(value, decimals) {
+  const factor = 10 ** Math.min(Number(decimals || 18), 18);
+  return Math.round(Number(value) * factor) / factor;
+}
+
+function parseTokenUnits(value, decimals) {
+  const rounded = roundToDecimals(value, decimals);
+  return ethers.parseUnits(rounded.toFixed(Number(decimals)), Number(decimals));
 }
 
 function toAmount(value) {
@@ -154,6 +175,153 @@ async function saveRate(supabase, baseAsset, quoteAsset, rate, source) {
       rateSaveWarnings.add(key);
       console.warn("exchange_rates save skipped:", error.message);
     }
+  }
+}
+
+function getProvider(network) {
+  const config = NETWORKS[network];
+  if (!config) throw new Error(`Unsupported swap network: ${network}`);
+  const rpcUrl = process.env[config.env];
+  if (!rpcUrl) throw new Error(`${config.env} is required for on-chain swaps.`);
+  return new ethers.JsonRpcProvider(rpcUrl, config.chainId);
+}
+
+function requirePrivateKey(envName) {
+  const privateKey = process.env[envName];
+  if (!privateKey || !/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new Error(`${envName} must be configured as a valid EVM private key.`);
+  }
+  return privateKey;
+}
+
+function getTreasuryWallet(provider) {
+  return new ethers.Wallet(requirePrivateKey("TREASURY_WALLET_PRIVATE_KEY"), provider);
+}
+
+function getFeeWalletAddress() {
+  return new ethers.Wallet(requirePrivateKey("FEE_WALLET_PRIVATE_KEY")).address;
+}
+
+async function waitForSwapTx(tx, label) {
+  const confirmations = Number(process.env.SWAP_WAIT_CONFIRMATIONS || 0);
+  if (!Number.isFinite(confirmations) || confirmations <= 0) return;
+  const receipt = await tx.wait(confirmations);
+  if (!receipt || receipt.status !== 1) throw new Error(`${label} failed on-chain.`);
+}
+
+function decryptPrivateKey(encryptedPrivateKey) {
+  const secret = process.env.WALLET_ENCRYPTION_SECRET;
+  if (!secret || secret.length < 32) throw new Error("WALLET_ENCRYPTION_SECRET must be set to at least 32 characters.");
+  const payload = JSON.parse(encryptedPrivateKey);
+  const key = crypto.createHash("sha256").update(secret).digest();
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(payload.iv, "base64"));
+  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(payload.ciphertext, "base64")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+async function getUserWallet(supabase, userId, provider) {
+  const { data, error } = await supabase
+    .from("custodial_wallets")
+    .select("wallet_address, encrypted_private_key")
+    .eq("user_id", userId)
+    .eq("chain_type", "EVM")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.encrypted_private_key || !ethers.isAddress(data.wallet_address)) {
+    throw new Error("User custodial wallet is missing or invalid.");
+  }
+  const wallet = new ethers.Wallet(decryptPrivateKey(data.encrypted_private_key), provider);
+  if (wallet.address.toLowerCase() !== data.wallet_address.toLowerCase()) {
+    throw new Error("Custodial wallet key does not match stored wallet address.");
+  }
+  return wallet;
+}
+
+async function getProfile(supabase, userId) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("wallet_address")
+    .eq("id", userId)
+    .single();
+  if (error) throw error;
+  if (!data?.wallet_address || !ethers.isAddress(data.wallet_address)) throw new Error("User wallet address is missing.");
+  return data;
+}
+
+async function getToken(supabase, symbol, network) {
+  const { data, error } = await supabase
+    .from("supported_tokens")
+    .select("symbol, decimals, network, chain_id, contract_address, is_active, explorer_base_url")
+    .eq("symbol", symbol)
+    .eq("network", network)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || !data.is_active) throw new Error(`${symbol} is not active on ${network}.`);
+  if (!ethers.isAddress(data.contract_address)) throw new Error(`${symbol} contract address is invalid.`);
+  return data;
+}
+
+function explorerUrl(token, txHash) {
+  return token.explorer_base_url && txHash ? `${token.explorer_base_url.replace(/\/$/, "")}/tx/${txHash}` : null;
+}
+
+async function settleCryptoFeeFromTreasury(supabase, preview, network, provider, treasury) {
+  if (!CRYPTO_ASSETS.has(preview.from_asset) || Number(preview.platform_fee_amount || 0) <= 0) {
+    return { fee_tx_hash: null, fee_wallet_address: null, fee_settlement_status: "not_required", fee_token_contract: null, fee_settlement_error: null };
+  }
+
+  const feeWalletAddress = getFeeWalletAddress();
+  const sourceToken = await getToken(supabase, preview.from_asset, network);
+  const feeUnits = parseTokenUnits(preview.platform_fee_amount, Number(sourceToken.decimals));
+  if (feeUnits <= 0n) {
+    return { fee_tx_hash: null, fee_wallet_address: feeWalletAddress, fee_settlement_status: "not_required", fee_token_contract: sourceToken.contract_address, fee_settlement_error: null };
+  }
+
+  try {
+    const contract = new ethers.Contract(sourceToken.contract_address, ERC20_ABI, treasury);
+    const [treasuryTokenBalance, treasuryNativeBalance] = await Promise.all([
+      contract.balanceOf(treasury.address),
+      provider.getBalance(treasury.address),
+    ]);
+    if (treasuryTokenBalance < feeUnits) {
+      return {
+        fee_tx_hash: null,
+        fee_wallet_address: feeWalletAddress,
+        fee_settlement_status: "pending_treasury_liquidity",
+        fee_token_contract: sourceToken.contract_address,
+        fee_settlement_error: `Treasury needs ${preview.from_asset} liquidity to settle swap fees on-chain.`,
+      };
+    }
+    if (treasuryNativeBalance <= 0n) {
+      return {
+        fee_tx_hash: null,
+        fee_wallet_address: feeWalletAddress,
+        fee_settlement_status: "pending_gas",
+        fee_token_contract: sourceToken.contract_address,
+        fee_settlement_error: "Treasury wallet needs native gas to settle swap fees.",
+      };
+    }
+
+    const feeTx = await contract.transfer(feeWalletAddress, feeUnits);
+    await waitForSwapTx(feeTx, "Treasury fee settlement");
+    return {
+      fee_tx_hash: feeTx.hash,
+      fee_wallet_address: feeWalletAddress,
+      fee_settlement_status: "submitted",
+      fee_token_contract: sourceToken.contract_address,
+      fee_settlement_error: null,
+    };
+  } catch (error) {
+    return {
+      fee_tx_hash: null,
+      fee_wallet_address: feeWalletAddress,
+      fee_settlement_status: "failed",
+      fee_token_contract: sourceToken.contract_address,
+      fee_settlement_error: error.message || "Treasury fee settlement failed.",
+    };
   }
 }
 
@@ -287,18 +455,19 @@ async function getAssetPrices(supabase) {
 async function buildPreview(supabase, fromAsset, toAsset, rawAmount) {
   const amount = toAmount(rawAmount);
   if (fromAsset === toAsset) throw new Error("Choose two different assets.");
-  if (fromAsset !== "NGN" && toAsset !== "NGN") throw new Error("Phase 9 supports NGN-to-crypto and crypto-to-NGN only.");
-  const cryptoAsset = fromAsset === "NGN" ? toAsset : fromAsset;
-  if (!CRYPTO_ASSETS.has(cryptoAsset)) throw new Error(`Unsupported conversion asset: ${cryptoAsset}`);
+  if (fromAsset !== "NGN" && !CRYPTO_ASSETS.has(fromAsset)) throw new Error(`Unsupported conversion asset: ${fromAsset}`);
+  if (toAsset !== "NGN" && !CRYPTO_ASSETS.has(toAsset)) throw new Error(`Unsupported conversion asset: ${toAsset}`);
 
-  const direction = fromAsset === "NGN" ? "ngn_crypto_conversion" : "crypto_ngn_conversion";
-  const { rate, source, base_ngn_usd_rate: baseNgnUsdRate, spread_ngn: spreadNgn, applied_ngn_usd_rate: appliedNgnUsdRate, price_pair: pricePair } = await getRate(supabase, cryptoAsset, direction);
+  const direction = fromAsset === "NGN"
+    ? "ngn_crypto_conversion"
+    : (toAsset === "NGN" ? "crypto_ngn_conversion" : "crypto_crypto_conversion");
 
   if (direction === "ngn_crypto_conversion") {
+    const { rate, source, base_ngn_usd_rate: baseNgnUsdRate, spread_ngn: spreadNgn, applied_ngn_usd_rate: appliedNgnUsdRate, price_pair: pricePair } = await getRate(supabase, toAsset, direction);
     const platformFee = roundAsset(amount * 0.006, "NGN");
     const statutoryFee = amount >= 10000 ? 50 : 0;
     const totalDeducted = roundAsset(amount + platformFee + statutoryFee, "NGN");
-    const toAmountValue = roundAsset(amount / rate, cryptoAsset);
+    const toAmountValue = roundAsset(amount / rate, toAsset);
     return {
       direction,
       from_asset: fromAsset,
@@ -331,42 +500,198 @@ async function buildPreview(supabase, fromAsset, toAsset, rawAmount) {
     };
   }
 
-  const ngnAmount = roundAsset(amount * rate, "NGN");
-  const platformFeeSource = roundAsset(amount * 0.006, cryptoAsset);
-  const statutoryFeeNgn = ngnAmount >= 10000 ? 50 : 0;
-  const statutorySource = statutoryFeeNgn > 0 ? roundAsset(statutoryFeeNgn / rate, cryptoAsset) : 0;
-  const totalDeducted = roundAsset(amount + platformFeeSource + statutorySource, cryptoAsset);
+  const sourceRate = await getRate(supabase, fromAsset, "crypto_ngn_conversion");
+  const preliminaryNetSource = amount / 1.006;
+  const preliminaryNgn = preliminaryNetSource * sourceRate.rate;
+  const statutoryFeeNgn = direction === "crypto_ngn_conversion" && preliminaryNgn >= 10000 ? 50 : 0;
+  const statutorySource = statutoryFeeNgn > 0 ? roundAsset(statutoryFeeNgn / sourceRate.rate, fromAsset) : 0;
+  const convertibleSource = roundAsset((amount - statutorySource) / 1.006, fromAsset);
+  const platformFeeSource = roundAsset(amount - statutorySource - convertibleSource, fromAsset);
+  const ngnAmount = roundAsset(convertibleSource * sourceRate.rate, "NGN");
+
+  if (direction === "crypto_crypto_conversion") {
+    const destinationRate = await getRate(supabase, toAsset, "ngn_crypto_conversion");
+    const destinationAmount = roundAsset(ngnAmount / destinationRate.rate, toAsset);
+    const effectiveRate = roundAsset(destinationAmount / amount, toAsset);
+    return {
+      direction,
+      from_asset: fromAsset,
+      to_asset: toAsset,
+      from_amount: convertibleSource,
+      to_amount: destinationAmount,
+      amount_ngn_equivalent: ngnAmount,
+      rate_used: effectiveRate,
+      source_rate_used: sourceRate.rate,
+      destination_rate_used: destinationRate.rate,
+      rate_source: `${sourceRate.source}/${destinationRate.source}`,
+      base_ngn_usd_rate: sourceRate.base_ngn_usd_rate,
+      spread_ngn: sourceRate.spread_ngn,
+      applied_ngn_usd_rate: null,
+      source_applied_ngn_usd_rate: sourceRate.applied_ngn_usd_rate,
+      destination_applied_ngn_usd_rate: destinationRate.applied_ngn_usd_rate,
+      price_pair: `${sourceRate.price_pair} -> ${destinationRate.price_pair}`,
+      platform_fee_amount: platformFeeSource,
+      statutory_fee_amount: statutoryFeeNgn,
+      statutory_fee_source_amount: statutorySource,
+      total_fee_amount: roundAsset(platformFeeSource + statutorySource, fromAsset),
+      total_deducted: roundAsset(amount, fromAsset),
+      fee_asset: fromAsset,
+      receiver_gets: destinationAmount,
+      fee_breakdown: {
+        amount: roundAsset(amount, fromAsset),
+        converted_source_amount: convertibleSource,
+        platform_fee: platformFeeSource,
+        statutory_fee: statutorySource,
+        statutory_fee_ngn: statutoryFeeNgn,
+        gas_fee_estimate: 0,
+        total_fee: roundAsset(platformFeeSource + statutorySource, fromAsset),
+        total_deducted: roundAsset(amount, fromAsset),
+        receiver_gets: destinationAmount,
+      },
+    };
+  }
+
   return {
     direction,
     from_asset: fromAsset,
     to_asset: toAsset,
-    from_amount: roundAsset(amount, cryptoAsset),
+    from_amount: convertibleSource,
     to_amount: ngnAmount,
     amount_ngn_equivalent: ngnAmount,
-    rate_used: rate,
-    rate_source: source,
-    base_ngn_usd_rate: baseNgnUsdRate,
-    spread_ngn: spreadNgn,
-    applied_ngn_usd_rate: appliedNgnUsdRate,
-    price_pair: pricePair,
+    rate_used: sourceRate.rate,
+    rate_source: sourceRate.source,
+    base_ngn_usd_rate: sourceRate.base_ngn_usd_rate,
+    spread_ngn: sourceRate.spread_ngn,
+    applied_ngn_usd_rate: sourceRate.applied_ngn_usd_rate,
+    price_pair: sourceRate.price_pair,
     platform_fee_amount: platformFeeSource,
     statutory_fee_amount: statutoryFeeNgn,
     statutory_fee_source_amount: statutorySource,
-    total_fee_amount: roundAsset(platformFeeSource + statutorySource, cryptoAsset),
-    total_deducted: totalDeducted,
-    fee_asset: cryptoAsset,
+    total_fee_amount: roundAsset(platformFeeSource + statutorySource, fromAsset),
+    total_deducted: roundAsset(amount, fromAsset),
+    fee_asset: fromAsset,
     receiver_gets: ngnAmount,
     fee_breakdown: {
-      amount: roundAsset(amount, cryptoAsset),
+      amount: roundAsset(amount, fromAsset),
+      converted_source_amount: convertibleSource,
       platform_fee: platformFeeSource,
       statutory_fee: statutorySource,
       statutory_fee_ngn: statutoryFeeNgn,
       gas_fee_estimate: 0,
-      total_fee: roundAsset(platformFeeSource + statutorySource, cryptoAsset),
-      total_deducted: totalDeducted,
+      total_fee: roundAsset(platformFeeSource + statutorySource, fromAsset),
+      total_deducted: roundAsset(amount, fromAsset),
       receiver_gets: ngnAmount,
     },
   };
+}
+
+async function settleSwapOnChain(supabase, userId, preview, network = "Arc Testnet") {
+  const profile = await getProfile(supabase, userId);
+
+  if (preview.to_asset === "NGN") {
+    const provider = getProvider(network);
+    const treasury = getTreasuryWallet(provider);
+    const feeSettlement = await settleCryptoFeeFromTreasury(supabase, preview, network, provider, treasury);
+    return {
+      network,
+      token: null,
+      treasury_tx_hash: null,
+      user_wallet_address: profile.wallet_address,
+      treasury_wallet_address: treasury.address,
+      fee_wallet_address: feeSettlement.fee_wallet_address,
+      fee_tx_hash: feeSettlement.fee_tx_hash,
+      fee_settlement_status: feeSettlement.fee_settlement_status,
+      fee_settlement_error: feeSettlement.fee_settlement_error,
+      fee_token_contract: feeSettlement.fee_token_contract,
+      settlement_status: "ledger_posted_pending_source_sweep",
+      sweep_required: preview.from_asset !== "NGN",
+    };
+  }
+
+  const token = await getToken(supabase, preview.to_asset, network);
+  const provider = getProvider(network);
+  const treasury = getTreasuryWallet(provider);
+  const contractWithTreasury = new ethers.Contract(token.contract_address, ERC20_ABI, treasury);
+  const userTokenAmount = parseTokenUnits(preview.to_amount, Number(token.decimals));
+  const [treasuryTokenBalance, treasuryNativeBalance] = await Promise.all([
+    contractWithTreasury.balanceOf(treasury.address),
+    provider.getBalance(treasury.address),
+  ]);
+  if (treasuryTokenBalance < userTokenAmount) throw new Error("NairaX treasury has insufficient test token liquidity.");
+  if (treasuryNativeBalance <= 0n) throw new Error("NairaX treasury wallet does not have native gas.");
+
+  const tx = await contractWithTreasury.transfer(profile.wallet_address, userTokenAmount);
+  await waitForSwapTx(tx, "Treasury crypto settlement");
+  const feeSettlement = preview.from_asset !== "NGN"
+    ? await settleCryptoFeeFromTreasury(supabase, preview, network, provider, treasury)
+    : { fee_tx_hash: null, fee_wallet_address: null, fee_settlement_status: "not_required", fee_token_contract: null, fee_settlement_error: null };
+
+  return {
+    network,
+    token,
+    treasury_tx_hash: tx.hash,
+    fee_tx_hash: feeSettlement.fee_tx_hash,
+    user_wallet_address: profile.wallet_address,
+    treasury_wallet_address: treasury.address,
+    fee_wallet_address: feeSettlement.fee_wallet_address,
+    fee_settlement_status: feeSettlement.fee_settlement_status,
+    fee_settlement_error: feeSettlement.fee_settlement_error,
+    fee_token_contract: feeSettlement.fee_token_contract,
+    explorer_url: explorerUrl(token, tx.hash),
+    fee_explorer_url: explorerUrl(token, feeSettlement.fee_tx_hash),
+    settlement_status: preview.from_asset === "NGN" ? "completed" : "completed_pending_source_sweep",
+    sweep_required: preview.from_asset !== "NGN",
+  };
+}
+
+async function recordSwapSettlement(supabase, ledgerTransactionId, settlement) {
+  if (!ledgerTransactionId || !settlement) return;
+  const conversionUpdate = await supabase
+    .from("conversion_transactions")
+    .update({
+      network: settlement.network,
+      token_contract: settlement.token?.contract_address || null,
+      treasury_wallet_address: settlement.treasury_wallet_address || null,
+      fee_wallet_address: settlement.fee_wallet_address || null,
+      user_wallet_address: settlement.user_wallet_address || null,
+      treasury_tx_hash: settlement.treasury_tx_hash || null,
+      fee_tx_hash: settlement.fee_tx_hash || null,
+      settlement_status: settlement.settlement_status || "completed",
+    })
+    .eq("ledger_transaction_id", ledgerTransactionId);
+  if (conversionUpdate.error && process.env.DEBUG_SWAP_SETTLEMENT === "true") {
+    console.warn("conversion settlement update skipped:", conversionUpdate.error.message);
+  }
+
+  const { data: ledgerRow } = await supabase
+    .from("ledger_transactions")
+    .select("metadata")
+    .eq("id", ledgerTransactionId)
+    .maybeSingle();
+
+  const ledgerUpdate = await supabase
+    .from("ledger_transactions")
+    .update({
+      tx_hash: settlement.treasury_tx_hash || null,
+      metadata: {
+        ...(ledgerRow?.metadata || {}),
+        onchain_settlement: true,
+        network: settlement.network,
+        token_contract: settlement.token?.contract_address || null,
+        treasury_tx_hash: settlement.treasury_tx_hash || null,
+        fee_tx_hash: settlement.fee_tx_hash || null,
+        treasury_wallet_address: settlement.treasury_wallet_address || null,
+        fee_wallet_address: settlement.fee_wallet_address || null,
+        fee_settlement_status: settlement.fee_settlement_status || null,
+        fee_settlement_error: settlement.fee_settlement_error || null,
+        fee_token_contract: settlement.fee_token_contract || null,
+        user_wallet_address: settlement.user_wallet_address || null,
+      },
+    })
+    .eq("id", ledgerTransactionId);
+  if (ledgerUpdate.error && process.env.DEBUG_SWAP_SETTLEMENT === "true") {
+    console.warn("ledger settlement update skipped:", ledgerUpdate.error.message);
+  }
 }
 
 exports.handler = async (event) => {
@@ -401,6 +726,7 @@ exports.handler = async (event) => {
         normalizeAsset(body.to_asset || body.toAsset),
         body.amount,
       );
+      const settlement = await settleSwapOnChain(supabase, user.id, preview, String(body.network || "Arc Testnet"));
       const { data, error } = await supabase.rpc("execute_asset_conversion", {
         p_user_id: user.id,
         p_from_asset: preview.from_asset,
@@ -417,7 +743,8 @@ exports.handler = async (event) => {
         p_rate_source: preview.rate_source,
       });
       if (error) throw error;
-      return json(200, { transactionId: data, preview });
+      await recordSwapSettlement(supabase, data, settlement);
+      return json(200, { transactionId: data, preview, settlement });
     }
 
     return json(400, { error: "Unsupported conversion action." });

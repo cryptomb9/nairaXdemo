@@ -2,6 +2,12 @@
 
 const { createClient } = require("@supabase/supabase-js");
 const { ethers } = require("ethers");
+const {
+  buildConversionPreview,
+  getConversionRate,
+  normalizeAsset,
+  roundAsset,
+} = require("./conversions");
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +80,14 @@ function toAmount(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a valid amount.");
   return amount;
+}
+
+function toTokenDecimalString(value, decimals) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) throw new Error("Invalid token amount.");
+  const factor = 10 ** Number(decimals);
+  const rounded = Math.round((numeric + Number.EPSILON) * factor) / factor;
+  return rounded.toFixed(Number(decimals)).replace(/\.?0+$/, "");
 }
 
 async function getProfile(supabase, userId) {
@@ -176,6 +190,7 @@ async function verifyDeposit(supabase, userId, body) {
 async function previewWithdrawal(supabase, body) {
   const network = String(body.network || "Arc Testnet");
   const symbol = normalizeSymbol(body.symbol);
+  const payAsset = normalizeAsset(body.pay_asset || body.payAsset || symbol);
   const amount = toAmount(body.amount);
   const token = await getToken(supabase, symbol, network);
   const { data: gasSetting, error: gasError } = await supabase
@@ -184,32 +199,99 @@ async function previewWithdrawal(supabase, body) {
     .eq("network", network)
     .maybeSingle();
   if (gasError) throw gasError;
-  const platformFee = Math.round(amount * 0.003 * 1e8) / 1e8;
-  const gasFeeEstimate = Math.max(0, Number(gasSetting?.withdrawal_gas_fee_amount || 0));
-  return {
+  const platformFee = roundAsset(amount * 0.003, symbol);
+  const gasFeeEstimate = roundAsset(Math.max(0, Number(gasSetting?.withdrawal_gas_fee_amount || 0)), symbol);
+  const destinationTotalRequired = roundAsset(amount + platformFee + gasFeeEstimate, symbol);
+  const base = {
     amount,
+    receive_asset: symbol,
+    pay_asset: payAsset,
     platform_fee: platformFee,
     gas_fee_estimate: gasFeeEstimate,
-    total_deducted: Math.round((amount + platformFee + gasFeeEstimate) * 1e8) / 1e8,
+    withdrawal_total_required: destinationTotalRequired,
     token,
+  };
+
+  if (payAsset === symbol) {
+    return {
+      ...base,
+      conversion_required: false,
+      conversion_fee_amount: 0,
+      statutory_fee_amount: 0,
+      total_fee_amount: roundAsset(platformFee + gasFeeEstimate, symbol),
+      total_deducted: destinationTotalRequired,
+      source_amount: amount,
+      source_asset: symbol,
+      receiver_gets: amount,
+    };
+  }
+
+  if (payAsset !== "NGN" && !["USDCX", "MON", "ETHX", "cirBTCX", "EURCX"].includes(payAsset)) {
+    throw new Error(`Unsupported payment asset: ${payAsset}`);
+  }
+
+  let conversionPreview;
+  if (payAsset === "NGN") {
+    const destinationRate = await getConversionRate(supabase, symbol, "ngn_crypto_conversion");
+    let sourceAmount = roundAsset(destinationTotalRequired * destinationRate.rate, "NGN");
+    conversionPreview = await buildConversionPreview(supabase, payAsset, symbol, sourceAmount);
+    for (let attempt = 0; attempt < 3 && conversionPreview.to_amount < destinationTotalRequired; attempt += 1) {
+      const shortfallRatio = (destinationTotalRequired - conversionPreview.to_amount) / destinationTotalRequired;
+      sourceAmount = roundAsset(sourceAmount * (1 + shortfallRatio + 0.0005), "NGN");
+      conversionPreview = await buildConversionPreview(supabase, payAsset, symbol, sourceAmount);
+    }
+    if (conversionPreview.to_amount < destinationTotalRequired) {
+      throw new Error("Could not quote enough converted balance for this withdrawal. Try a slightly smaller amount.");
+    }
+  } else {
+    const [sourceRate, destinationRate] = await Promise.all([
+      getConversionRate(supabase, payAsset, "crypto_ngn_conversion"),
+      getConversionRate(supabase, symbol, "ngn_crypto_conversion"),
+    ]);
+    let sourceTotal = roundAsset((destinationTotalRequired * destinationRate.rate / sourceRate.rate) / 0.994, payAsset);
+    conversionPreview = await buildConversionPreview(supabase, payAsset, symbol, sourceTotal);
+    for (let attempt = 0; attempt < 3 && conversionPreview.to_amount < destinationTotalRequired; attempt += 1) {
+      const shortfallRatio = (destinationTotalRequired - conversionPreview.to_amount) / destinationTotalRequired;
+      sourceTotal = roundAsset(sourceTotal * (1 + shortfallRatio + 0.0005), payAsset);
+      conversionPreview = await buildConversionPreview(supabase, payAsset, symbol, sourceTotal);
+    }
+    if (conversionPreview.to_amount < destinationTotalRequired) {
+      throw new Error("Could not quote enough converted balance for this withdrawal. Try a slightly smaller amount.");
+    }
+  }
+
+  return {
+    ...base,
+    conversion_required: true,
+    conversion: conversionPreview,
+    conversion_fee_amount: conversionPreview.platform_fee_amount,
+    statutory_fee_amount: conversionPreview.statutory_fee_amount,
+    total_fee_amount: roundAsset(conversionPreview.total_fee_amount + platformFee + gasFeeEstimate, payAsset),
+    total_deducted: conversionPreview.total_deducted,
+    source_amount: conversionPreview.from_amount,
+    source_asset: payAsset,
+    receiver_gets: amount,
+    rate_used: conversionPreview.rate_used,
+    rate_source: conversionPreview.rate_source,
   };
 }
 
 async function withdrawExternal(supabase, userId, body) {
   const network = String(body.network || "Arc Testnet");
   const symbol = normalizeSymbol(body.symbol);
+  const payAsset = normalizeAsset(body.pay_asset || body.payAsset || symbol);
   const amount = toAmount(body.amount);
   const recipient = String(body.recipient || body.recipientAddress || "").trim();
   if (!ethers.isAddress(recipient)) throw new Error("Enter a valid recipient wallet address.");
 
   const token = await getToken(supabase, symbol, network);
-  const preview = await previewWithdrawal(supabase, { network, symbol, amount });
+  const preview = await previewWithdrawal(supabase, { network, symbol, pay_asset: payAsset, amount });
   const provider = getProvider(network);
   const treasury = getTreasuryWallet(provider);
   const feeWalletAddress = getFeeWalletAddress();
   const contract = new ethers.Contract(token.contract_address, ERC20_ABI, treasury);
-  const amountUnits = ethers.parseUnits(String(amount), Number(token.decimals));
-  const platformFeeUnits = ethers.parseUnits(String(preview.platform_fee), Number(token.decimals));
+  const amountUnits = ethers.parseUnits(toTokenDecimalString(amount, token.decimals), Number(token.decimals));
+  const platformFeeUnits = ethers.parseUnits(toTokenDecimalString(preview.platform_fee, token.decimals), Number(token.decimals));
 
   const [treasuryTokenBalance, treasuryNativeBalance] = await Promise.all([
     contract.balanceOf(treasury.address),
@@ -220,6 +302,28 @@ async function withdrawExternal(supabase, userId, body) {
 
   let withdrawalId = null;
   try {
+    let conversionLedgerTransactionId = null;
+    if (preview.conversion_required) {
+      const conversion = preview.conversion;
+      const { data: conversionTxId, error: conversionError } = await supabase.rpc("execute_asset_conversion", {
+        p_user_id: userId,
+        p_from_asset: conversion.from_asset,
+        p_to_asset: conversion.to_asset,
+        p_from_amount: conversion.from_amount,
+        p_to_amount: conversion.to_amount,
+        p_rate_used: conversion.rate_used,
+        p_amount_ngn_equivalent: conversion.amount_ngn_equivalent,
+        p_platform_fee_amount: conversion.platform_fee_amount,
+        p_statutory_fee_amount: conversion.statutory_fee_amount,
+        p_statutory_fee_source_amount: conversion.statutory_fee_source_amount,
+        p_total_fee_amount: conversion.total_fee_amount,
+        p_total_deducted: conversion.total_deducted,
+        p_rate_source: conversion.rate_source,
+      });
+      if (conversionError) throw conversionError;
+      conversionLedgerTransactionId = conversionTxId;
+    }
+
     const { data, error } = await supabase.rpc("create_crypto_withdrawal_pending", {
       sender_user_id: userId,
       withdrawal_network: network,
@@ -278,14 +382,19 @@ async function withdrawExternal(supabase, userId, body) {
 
     return {
       withdrawal_id: withdrawalId,
+      conversion_ledger_transaction_id: conversionLedgerTransactionId,
       ledger_transaction_id: ledgerTransactionId,
       tx_hash: tx.hash,
       amount,
       symbol: token.symbol,
+      pay_asset: preview.pay_asset,
       network,
       platform_fee: preview.platform_fee,
       gas_fee_estimate: preview.gas_fee_estimate,
       total_deducted: preview.total_deducted,
+      conversion_required: preview.conversion_required,
+      conversion_fee_amount: preview.conversion_fee_amount,
+      statutory_fee_amount: preview.statutory_fee_amount,
       fee_tx_hash: feeTxHash,
       fee_settlement_status: feeSettlementStatus,
       explorer_url: explorerUrl(token, tx.hash),
